@@ -218,7 +218,7 @@ y 의 범위: [0,  영역 높이 − 타이틀바 높이]
 | `pointercancel` | 적용하지 않고 끝 |
 | 버튼이 떼어진 채로 온 `pointermove` (`buttons === 0`) | 놓은 것으로 보고 적용하며 끝 |
 
-**pointer capture 를 잃는 것은 끝나는 조건이 아닙니다.** 손잡이에 capture 를 걸긴 하지만 보조일 뿐입니다. capture 는 버튼을 놓기 전에도 풀릴 수 있고, 화면 끝에서 놓을 때 실제로 `lostpointercapture` 가 `pointerup` 보다 먼저 오는 것이 관측됐습니다. 그것을 끝으로 삼으면 미리보기가 떠 있던 스냅이 버려집니다. 자세한 경위는 [스냅 드롭 문제 조사](./investigations/snap-drop.md)에 있습니다.
+**pointer capture 를 잃는 것은 끝나는 조건이 아닙니다.** 손잡이에 capture 를 걸긴 하지만 보조일 뿐입니다. capture 는 버튼을 놓기 전에도 풀릴 수 있고, 실제 마우스로 가장자리에 놓았을 때 `lostpointercapture` 가 `pointerup` 보다 먼저 오는 것이 관측됐습니다. 그것을 끝으로 삼으면 미리보기가 떠 있던 스냅이 버려집니다. 자세한 경위는 [스냅 드롭 문제 조사](./investigations/snap-drop.md)에 있습니다.
 
 창이 포커스를 잃어도(`blur`) 제스처를 끝내지 않습니다. capture 를 잃는 원인이 포커스일 가능성을 배제하지 못했기 때문입니다. `pointerup` 을 못 받은 채 끝난 제스처는 다음 이동에서 `buttons === 0` 으로 정리됩니다.
 

@@ -137,7 +137,7 @@ Base UI 의 `Dialog` 는 `modal={false}` 여도 바깥 누름과 포커스 이�
 
 ## D14. 제스처의 수명을 pointer capture 에 묶지 않는다 (구현 중 판단)
 
-처음에는 손잡이에 capture 를 걸고 `lostpointercapture` 를 "취소"로 처리했습니다. 실제 마우스에서 화면 끝에 놓을 때 `lostpointercapture` 가 `pointerup` 보다 먼저 와서, 미리보기가 떠 있던 스냅이 버려졌습니다.
+처음에는 손잡이에 capture 를 걸고 `lostpointercapture` 를 "취소"로 처리했습니다. 실제 마우스로 가장자리에 놓을 때 `lostpointercapture` 가 `pointerup` 보다 먼저 와서, 미리보기가 떠 있던 스냅이 버려졌습니다.
 
 지금은 `window` 에서 이동·놓기·취소를 듣고, capture 는 보조로만 겁니다. 경위는 [스냅 드롭 문제 조사](./investigations/snap-drop.md)에 있습니다.
 

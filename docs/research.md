@@ -24,7 +24,7 @@
 
 | | Ark UI `FloatingPanel` | KendoReact `Window` | Dockview floating group |
 |---|---|---|---|
-| 드래그, 리사이즈 | 있음, 8방향 (문서) | 있음 (문서) | 있음 (문서) |
+| 드래그, 리사이즈 | 있음, 8방향 (문서) | 있음 (문서) | 드래그 있음 (문서). 리사이즈는 미확인 |
 | 최소화·최대화 | 둘 다 (문서) | `MINIMIZED`, `FULLSCREEN` (문서) | 최대화 불가 (문서) |
 | 여러 창의 순서 | 전역 스택. 열리거나 포커스를 받으면 맨 앞 (소스) | Kendo 컴포넌트끼리 자동 z-index (문서). 형제 창을 눌렀을 때는 미확인 | 미확인 |
 | 경계 제한 | `getBoundaryEl`, `allowOverflow` (문서) | 미확인 | `floatingGroupBounds` (문서) |
@@ -110,6 +110,7 @@ Base UI 와 shadcn:
 - [How do I put a window at the edge of the screen without triggering the automatic positioning behavior? (The Old New Thing)](https://devblogs.microsoft.com/oldnewthing/20090729-00/?p=17313)
 - [Designing Aero Snap (Microsoft)](https://learn.microsoft.com/en-us/archive/blogs/e7/designing-aero-snap)
 - [macOS Sequoia: How Window Tiling and Snapping Currently Works (MacRumors)](https://www.macrumors.com/2024/06/12/macos-sequoia-window-tiling/)
+- [Sequoia maximizes window when dragged near the top of the screen (Apple Community)](https://origin-discussions2-us-dr-prz.apple.com/thread/255762463)
 - [KDE Bug 509936: Configurable distance from screen edge for triggering quick tiling](https://bugs.kde.org/show_bug.cgi?id=509936)
 - [KWin Screen Edges 문서](https://docs.kde.org/stable_kf6/en/kwin/kcontrol/kwinscreenedges/)
 
