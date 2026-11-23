@@ -269,3 +269,250 @@ describe('setLayout', () => {
     expect(layout.windows.b!.rect).toMatchObject({ x: 20, y: 20 })
   })
 })
+
+describe('최대화와 스냅', () => {
+  it('최대화해도 일반 상태의 자리는 남고, 실제 자리는 영역을 채운다', () => {
+    const store = setup()
+    store.register('a', { ...size, x: 100, y: 100 })
+    store.maximize('a')
+    expect(store.getState().layout.windows.a).toEqual({
+      rect: { x: 100, y: 100, ...size },
+      placement: 'maximized',
+    })
+    expect(store.getEffectiveRect('a')).toEqual({ x: 0, y: 0, width: 1000, height: 800 })
+  })
+
+  it('영역 크기가 바뀌면 최대화·스냅된 창이 따라간다', () => {
+    const store = setup()
+    store.register('a', size)
+    store.register('b', size)
+    store.maximize('a')
+    store.snap('b', 'right')
+    store.setAreaSize({ width: 600, height: 400 })
+    expect(store.getEffectiveRect('a')).toEqual({ x: 0, y: 0, width: 600, height: 400 })
+    expect(store.getEffectiveRect('b')).toEqual({ x: 300, y: 0, width: 300, height: 400 })
+  })
+
+  it('toggleMaximize 와 restore 는 일반 상태의 자리로 되돌린다', () => {
+    const store = setup()
+    store.register('a', { ...size, x: 100, y: 100 })
+    store.toggleMaximize('a')
+    expect(store.getState().layout.windows.a!.placement).toBe('maximized')
+    store.toggleMaximize('a')
+    expect(store.getEffectiveRect('a')).toEqual({ x: 100, y: 100, ...size })
+    store.snap('a', 'left')
+    store.restore('a')
+    expect(store.getEffectiveRect('a')).toEqual({ x: 100, y: 100, ...size })
+  })
+
+  it('최대화된 창은 리사이즈하지 않는다', () => {
+    const store = setup()
+    store.register('a', { ...size, x: 100, y: 100 })
+    store.maximize('a')
+    const before = store.getState().layout
+    store.resizeFrom('a', store.getEffectiveRect('a')!, 'se', { x: -100, y: -100 })
+    expect(store.getState().layout).toBe(before)
+  })
+
+  it('스냅된 창을 리사이즈하면 그 자리에서 일반 상태가 된다', () => {
+    const store = setup()
+    store.register('a', { ...size, x: 100, y: 100 })
+    store.snap('a', 'left')
+    store.resizeFrom('a', store.getEffectiveRect('a')!, 'e', { x: -100, y: 0 })
+    expect(store.getState().layout.windows.a).toEqual({
+      rect: { x: 0, y: 0, width: 400, height: 800 },
+      placement: 'normal',
+    })
+  })
+
+  it('최대화된 창을 끌면 일반 크기로 풀려 포인터 아래에 놓인다', () => {
+    const store = setup()
+    store.register('a', { ...size, x: 100, y: 100 })
+    store.maximize('a')
+    const start = store.detach('a', { x: 500, y: 16 })
+    expect(start).toEqual({ x: 350, y: 0, ...size })
+    expect(store.getState().layout.windows.a).toEqual({ rect: start, placement: 'normal' })
+  })
+
+  it('일반 상태의 창은 detach 해도 그대로다', () => {
+    const store = setup()
+    store.register('a', { ...size, x: 100, y: 100 })
+    const before = store.getState().layout
+    expect(store.detach('a', { x: 150, y: 110 })).toEqual({ x: 100, y: 100, ...size })
+    expect(store.getState().layout).toBe(before)
+  })
+})
+
+describe('최소화', () => {
+  it('활성 창은 그다음 앞에 있는 보이는 창으로 넘어간다', () => {
+    const store = setup()
+    store.register('a', size)
+    store.register('b', size)
+    store.register('c', size)
+    store.minimize('b')
+    store.minimize('c')
+    expect(store.getState().activeId).toBe('a')
+    expect(store.getState().layout.order).toEqual(['a', 'b', 'c'])
+  })
+
+  it('보이는 창이 없으면 활성 창이 없다', () => {
+    const store = setup()
+    store.register('a', size)
+    store.minimize('a')
+    expect(store.getState().activeId).toBeNull()
+  })
+
+  it('복원하면 최소화 전의 배치로 돌아오고 맨 앞에서 활성화된다', () => {
+    const store = setup()
+    store.register('a', size)
+    store.register('b', size)
+    store.maximize('a')
+    store.minimize('a')
+    expect(store.getState().layout.windows.a).toMatchObject({
+      placement: 'minimized',
+      restorePlacement: 'maximized',
+    })
+    store.restore('a')
+    expect(store.getState().layout.windows.a!.placement).toBe('maximized')
+    expect(store.getState().layout.windows.a!.restorePlacement).toBeUndefined()
+    expect(store.getState().layout.order).toEqual(['b', 'a'])
+    expect(store.getState().activeId).toBe('a')
+  })
+
+  it('activate 도 최소화된 창을 되돌린다', () => {
+    const store = setup()
+    store.register('a', size)
+    store.snap('a', 'left')
+    store.minimize('a')
+    store.activate('a')
+    expect(store.getState().layout.windows.a!.placement).toEqual({ snap: 'left' })
+  })
+
+  it('활성 창을 닫을 때 최소화된 창으로는 넘어가지 않는다', async () => {
+    const store = setup()
+    store.register('a', size)
+    store.register('b', size)
+    store.register('c', size)
+    store.minimize('b')
+    store.activate('c')
+    store.unregister('c')
+    await flush()
+    expect(store.getState().activeId).toBe('a')
+  })
+
+  it('최소화된 채 닫힌 창을 다시 열면 보이는 상태로 열린다', async () => {
+    const store = setup()
+    store.register('a', size)
+    store.maximize('a')
+    store.minimize('a')
+    store.unregister('a')
+    await flush()
+    store.register('a', size)
+    expect(store.getState().layout.windows.a!.placement).toBe('maximized')
+    expect(store.getState().activeId).toBe('a')
+  })
+})
+
+describe('끌어서 스냅', () => {
+  function snapSetup() {
+    const store = createWindowManagerStore(undefined, { snap: true })
+    store.setAreaSize({ width: 1000, height: 800 })
+    store.register('a', { ...size, x: 100, y: 100 })
+    return store
+  }
+
+  it('스냅이 꺼져 있으면 미리보기가 생기지 않는다', () => {
+    const store = setup()
+    store.register('a', size)
+    store.beginGesture('a', 'move')
+    store.previewSnap({ x: 0, y: 400 })
+    expect(store.getState().snapPreview).toBeNull()
+  })
+
+  it('가장자리에 닿으면 미리보기가 생기고, 떨어지면 사라진다', () => {
+    const store = snapSetup()
+    store.beginGesture('a', 'move')
+    store.previewSnap({ x: 2, y: 400 })
+    expect(store.getState().snapPreview).toBe('left')
+    store.previewSnap({ x: 300, y: 400 })
+    expect(store.getState().snapPreview).toBeNull()
+  })
+
+  it('놓을 때에만 적용한다', () => {
+    const store = snapSetup()
+    store.beginGesture('a', 'move')
+    store.previewSnap({ x: 998, y: 400 })
+    expect(store.getState().layout.windows.a!.placement).toBe('normal')
+    store.endGesture()
+    expect(store.getState().layout.windows.a!.placement).toEqual({ snap: 'right' })
+    expect(store.getState().snapPreview).toBeNull()
+  })
+
+  it('위쪽 가장자리에서 놓으면 최대화된다', () => {
+    const store = snapSetup()
+    store.beginGesture('a', 'move')
+    store.previewSnap({ x: 500, y: 0 })
+    store.endGesture()
+    expect(store.getState().layout.windows.a!.placement).toBe('maximized')
+  })
+
+  it('취소된 제스처는 미리보기만 지운다', () => {
+    const store = snapSetup()
+    store.beginGesture('a', 'move')
+    store.previewSnap({ x: 2, y: 400 })
+    store.endGesture({ commit: false })
+    expect(store.getState().layout.windows.a!.placement).toBe('normal')
+    expect(store.getState().snapPreview).toBeNull()
+  })
+
+  it('끄는 도중에 창이 닫히면 미리보기를 지운다', async () => {
+    const store = snapSetup()
+    store.beginGesture('a', 'move')
+    store.previewSnap({ x: 2, y: 400 })
+    store.unregister('a')
+    await flush()
+    expect(store.getState().snapPreview).toBeNull()
+    expect(store.getState().gesture).toBeNull()
+  })
+
+  it('리사이즈 중에는 스냅하지 않는다', () => {
+    const store = snapSetup()
+    store.beginGesture('a', 'resize')
+    store.previewSnap({ x: 2, y: 400 })
+    expect(store.getState().snapPreview).toBeNull()
+  })
+})
+
+describe('getWindowList', () => {
+  it('연 순서대로 돌려주고, 활성화해도 순서가 바뀌지 않는다', () => {
+    const store = setup()
+    store.register('a', size)
+    store.register('b', size)
+    store.activate('a')
+    expect(store.getWindowList()).toEqual([
+      { id: 'a', placement: 'normal', active: true },
+      { id: 'b', placement: 'normal', active: false },
+    ])
+  })
+
+  it('창을 옮기는 동안에는 같은 배열을 돌려준다', () => {
+    const store = setup()
+    store.register('a', size)
+    const before = store.getWindowList()
+    store.moveTo('a', { x: 300, y: 300 })
+    expect(store.getWindowList()).toBe(before)
+    store.minimize('a')
+    expect(store.getWindowList()).not.toBe(before)
+    expect(store.getWindowList()[0]).toMatchObject({ placement: 'minimized', active: false })
+  })
+
+  it('저장된 배치로 시작한 창도 열리면 목록에 나온다', () => {
+    const store = setup({
+      windows: { a: { rect: { x: 1, y: 2, ...size }, placement: 'normal' } },
+      order: ['a'],
+    })
+    expect(store.getWindowList()).toEqual([])
+    store.register('a', size)
+    expect(store.getWindowList()).toEqual([{ id: 'a', placement: 'normal', active: false }])
+  })
+})

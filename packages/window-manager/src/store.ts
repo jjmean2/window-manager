@@ -9,26 +9,26 @@ import {
   type ResizeEdge,
   type Size,
 } from './geometry.ts'
+import {
+  detachRect,
+  effectiveRect,
+  isSamePlacement,
+  placementName,
+  snapTargetAt,
+  type PlacedWindow,
+  type PlacementName,
+  type SnapOptions,
+  type SnapTarget,
+  type SnapZone,
+  type VisiblePlacement,
+} from './placement.ts'
 
-/** 1단계에서는 'normal' 만 쓴다. 나머지는 최소화·최대화·스냅을 위해 자리만 잡아 둔다. */
-export type WindowPlacement =
-  | 'normal'
-  | 'minimized'
-  | 'maximized'
-  | { snap: 'left' | 'right' | 'top' | 'bottom' }
-
-export interface WindowState {
-  /** 기준 영역의 왼쪽 위를 원점으로 한 좌표 */
-  rect: Rect
-  placement: WindowPlacement
-  /** normal 로 돌아갈 자리 */
-  restoreRect?: Rect
-}
+export type WindowState = PlacedWindow
 
 export interface WindowLayout {
   /** 닫힌 창의 자리도 남겨 두어, 다시 열면 같은 곳에 나타난다 */
   windows: Record<string, WindowState>
-  /** 열려 있는 창의 겹침 순서. 끝이 맨 앞이다 */
+  /** 열려 있는 창의 겹침 순서. 끝이 맨 앞이다. 최소화된 창도 제자리를 지킨다 */
   order: string[]
 }
 
@@ -37,9 +37,13 @@ export type GestureType = 'move' | 'resize'
 export interface WindowManagerState {
   layout: WindowLayout
   activeId: string | null
+  /** 열려 있는 창. 연 순서대로다 */
+  openIds: readonly string[]
   layerEl: HTMLElement | null
   areaSize: Size | null
   gesture: { id: string; type: GestureType } | null
+  /** 끌고 있는 창을 지금 놓으면 적용될 스냅 대상 */
+  snapPreview: SnapTarget | null
 }
 
 export interface WindowMeta {
@@ -60,6 +64,17 @@ export interface WindowManagerOptions {
   minVisibleWidth?: number
   /** 타이틀바를 아직 재지 못했을 때 쓰는 높이. 기본 32 */
   fallbackTitlebarHeight?: number
+  /**
+   * 끌다가 포인터가 가장자리에 닿으면 스냅한다. 기본은 꺼져 있다.
+   * 켜면 포인터가 좌우 가장자리에 닿은 채로는 창을 그쪽 화면 밖에 걸쳐 둘 수 없다.
+   */
+  snap?: boolean | Partial<SnapOptions>
+}
+
+export interface WindowListItem {
+  id: string
+  placement: PlacementName
+  active: boolean
 }
 
 export const DEFAULT_MIN_SIZE: Size = { width: 200, height: 120 }
@@ -67,8 +82,28 @@ export const DEFAULT_MIN_SIZE: Size = { width: 200, height: 120 }
 const EMPTY_LAYOUT: WindowLayout = { windows: {}, order: [] }
 const CASCADE_ORIGIN = 48
 const CASCADE_STEP = 28
+const DEFAULT_SNAP: SnapOptions = { threshold: 8, top: true }
 
 export type WindowManagerStore = ReturnType<typeof createWindowManagerStore>
+
+function resolveSnapOptions(snap: WindowManagerOptions['snap']): SnapOptions | null {
+  if (!snap) return null
+  return snap === true ? DEFAULT_SNAP : { ...DEFAULT_SNAP, ...snap }
+}
+
+function topVisible(
+  order: readonly string[],
+  openIds: readonly string[],
+  windows: Record<string, WindowState>,
+): string | null {
+  return (
+    order.findLast((id) => openIds.includes(id) && windows[id]?.placement !== 'minimized') ?? null
+  )
+}
+
+function leaveMinimized(win: WindowState): WindowState {
+  return { rect: win.rect, placement: win.restorePlacement ?? 'normal' }
+}
 
 export function createWindowManagerStore(
   initialLayout: WindowLayout = EMPTY_LAYOUT,
@@ -76,24 +111,27 @@ export function createWindowManagerStore(
 ) {
   const minVisibleWidth = options.minVisibleWidth ?? 64
   const fallbackTitlebarHeight = options.fallbackTitlebarHeight ?? 32
+  const snapOptions = resolveSnapOptions(options.snap)
 
   let state: WindowManagerState = {
     // 저장된 order 는 그대로 믿는다. 열리지 않은 id 가 섞여 있어도 순서 계산에는 해가 없다.
     layout: initialLayout,
     activeId: null,
+    openIds: [],
     layerEl: null,
     areaSize: null,
     gesture: null,
+    snapPreview: null,
   }
 
   const listeners = new Set<() => void>()
   const meta = new Map<string, WindowMeta>()
-  const openIds = new Set<string>()
   const pendingRemoval = new Set<string>()
 
   let layoutListener: ((layout: WindowLayout) => void) | null = null
   let emittedLayout = state.layout
   let emitScheduled = false
+  let listCache: { key: string; value: WindowListItem[] } | null = null
 
   function setState(next: WindowManagerState) {
     if (next === state) return
@@ -129,18 +167,25 @@ export function createWindowManagerStore(
     return area ? clampPosition(rect, area, constraintFor(id)) : rect
   }
 
-  function setRect(id: string, rect: Rect) {
-    const current = state.layout.windows[id]
-    if (!current || rectEquals(current.rect, rect)) return
-    setState({
-      ...state,
-      layout: {
-        ...state.layout,
-        windows: { ...state.layout.windows, [id]: { ...current, rect } },
-      },
-    })
+  function withWindow(id: string, win: WindowState): WindowLayout {
+    return { ...state.layout, windows: { ...state.layout.windows, [id]: win } }
   }
 
+  /** 일반 상태의 자리를 바꾼다. 최대화·스냅 상태였다면 일반 상태로 돌아간다. */
+  function setNormalRect(id: string, rect: Rect) {
+    const current = state.layout.windows[id]
+    if (!current) return
+    if (current.placement === 'normal' && rectEquals(current.rect, rect)) return
+    setState({ ...state, layout: withWindow(id, { rect, placement: 'normal' }) })
+  }
+
+  function setPlacement(id: string, placement: VisiblePlacement) {
+    const current = state.layout.windows[id]
+    if (!current || isSamePlacement(current.placement, placement)) return
+    setState({ ...state, layout: withWindow(id, { rect: current.rect, placement }) })
+  }
+
+  /** rect 는 언제나 일반 상태의 자리이므로, 배치와 상관없이 모든 창에 적용한다. */
   function reclampAll(layout: WindowLayout, area: Size | null = state.areaSize): WindowLayout {
     let windows = layout.windows
     for (const [id, win] of Object.entries(layout.windows)) {
@@ -160,6 +205,32 @@ export function createWindowManagerStore(
       y: defaults.y ?? offset,
       width: defaults.width,
       height: defaults.height,
+    })
+  }
+
+  /** 사라지는 창에 있던 포커스를 새 활성 창으로 옮긴다. */
+  function handOverFocus(fromId: string, toId: string | null) {
+    if (!toId || typeof document === 'undefined') return
+    const focused = document.activeElement
+    const from = meta.get(fromId)?.el
+    if (focused === document.body || (from && focused && from.contains(focused))) {
+      meta.get(toId)?.el?.focus({ preventScroll: true })
+    }
+  }
+
+  function activate(id: string) {
+    const { layout } = state
+    const win = layout.windows[id]
+    if (!win) return
+    const isFront = layout.order[layout.order.length - 1] === id
+    const minimized = win.placement === 'minimized'
+    if (isFront && !minimized && state.activeId === id) return
+    const windows = minimized ? { ...layout.windows, [id]: leaveMinimized(win) } : layout.windows
+    const order = isFront ? layout.order : [...layout.order.filter((other) => other !== id), id]
+    setState({
+      ...state,
+      activeId: id,
+      layout: isFront && !minimized ? layout : { windows, order },
     })
   }
 
@@ -192,24 +263,26 @@ export function createWindowManagerStore(
      */
     register(id: string, defaults: DefaultRect) {
       pendingRemoval.delete(id)
-      openIds.add(id)
       const { layout } = state
+      const openIds = state.openIds.includes(id) ? state.openIds : [...state.openIds, id]
       const existing = layout.windows[id]
       const inOrder = layout.order.includes(id)
-      if (existing && inOrder) return
-      const windows = existing
-        ? layout.windows
-        : {
-            ...layout.windows,
-            [id]: {
-              rect: fitToArea(id, resolveDefaultRect(defaults)),
-              placement: 'normal' as const,
-            },
-          }
+      if (existing && inOrder && openIds === state.openIds) return
+
+      let windows = layout.windows
+      if (!existing) {
+        const rect = fitToArea(id, resolveDefaultRect(defaults))
+        windows = { ...windows, [id]: { rect, placement: 'normal' } }
+      } else if (!inOrder && existing.placement === 'minimized') {
+        // 최소화된 채 닫혔던 창을 다시 열면 보이는 상태로 연다.
+        windows = { ...windows, [id]: leaveMinimized(existing) }
+      }
       const order = inOrder ? layout.order : [...layout.order, id]
+      const unchanged = windows === layout.windows && order === layout.order
       setState({
         ...state,
-        layout: { windows, order },
+        openIds,
+        layout: unchanged ? layout : { windows, order },
         activeId: inOrder ? state.activeId : id,
       })
     },
@@ -222,53 +295,115 @@ export function createWindowManagerStore(
       pendingRemoval.add(id)
       queueMicrotask(() => {
         if (!pendingRemoval.delete(id)) return
-        openIds.delete(id)
-        meta.delete(id)
+        const { layout } = state
+        const openIds = state.openIds.filter((other) => other !== id)
+        const order = layout.order.includes(id)
+          ? layout.order.filter((other) => other !== id)
+          : layout.order
         // 이동·리사이즈 도중에 닫히면 손잡이가 사라져 제스처가 끝나지 않는다. 여기서 풀어 준다.
         const gesture = state.gesture?.id === id ? null : state.gesture
-        const { layout } = state
-        if (!layout.order.includes(id)) {
-          if (gesture !== state.gesture) setState({ ...state, gesture })
-          return
-        }
-        const order = layout.order.filter((other) => other !== id)
-        const activeId =
-          state.activeId === id ? (order.findLast((other) => openIds.has(other)) ?? null) : state.activeId
-        setState({ ...state, layout: { ...layout, order }, activeId, gesture })
-        // 닫힌 창에 있던 포커스가 body 로 떨어졌으면 새 활성 창으로 옮긴다.
-        if (activeId && typeof document !== 'undefined' && document.activeElement === document.body) {
-          meta.get(activeId)?.el?.focus({ preventScroll: true })
-        }
+        const wasActive = state.activeId === id
+        const activeId = wasActive ? topVisible(order, openIds, layout.windows) : state.activeId
+        setState({
+          ...state,
+          openIds,
+          gesture,
+          snapPreview: gesture ? state.snapPreview : null,
+          layout: order === layout.order ? layout : { ...layout, order },
+          activeId,
+        })
+        if (wasActive) handOverFocus(id, activeId)
+        meta.delete(id)
       })
     },
 
-    /** 맨 앞으로 가져오고 활성 창으로 만든다. */
-    activate(id: string) {
-      const { layout } = state
-      if (!layout.windows[id]) return
-      const isFront = layout.order[layout.order.length - 1] === id
-      if (isFront && state.activeId === id) return
-      setState({
-        ...state,
-        activeId: id,
-        layout: isFront
-          ? layout
-          : { ...layout, order: [...layout.order.filter((other) => other !== id), id] },
-      })
-    },
+    /** 맨 앞으로 가져오고 활성 창으로 만든다. 최소화된 창은 원래 배치로 되돌린다. */
+    activate,
 
     deactivate() {
       if (state.activeId !== null) setState({ ...state, activeId: null })
     },
 
+    maximize(id: string) {
+      setPlacement(id, 'maximized')
+    },
+
+    snap(id: string, zone: SnapZone) {
+      setPlacement(id, { snap: zone })
+    },
+
+    /** 최대화면 일반 상태로, 아니면 최대화로 바꾼다. */
+    toggleMaximize(id: string) {
+      const win = state.layout.windows[id]
+      if (!win) return
+      setPlacement(id, win.placement === 'maximized' ? 'normal' : 'maximized')
+    },
+
+    /** 최소화된 창은 원래 배치로 되돌리며 활성화하고, 최대화·스냅된 창은 일반 상태로 돌린다. */
+    restore(id: string) {
+      const win = state.layout.windows[id]
+      if (!win) return
+      if (win.placement === 'minimized') activate(id)
+      else setPlacement(id, 'normal')
+    },
+
+    /** 창을 숨긴다. 내용은 마운트된 채 남고, 활성 창은 그다음 앞에 있는 창으로 넘어간다. */
+    minimize(id: string) {
+      const win = state.layout.windows[id]
+      if (!win || win.placement === 'minimized') return
+      const layout = withWindow(id, {
+        rect: win.rect,
+        placement: 'minimized',
+        restorePlacement: win.placement,
+      })
+      const activeId =
+        state.activeId === id
+          ? topVisible(layout.order, state.openIds, layout.windows)
+          : state.activeId
+      const gesture = state.gesture?.id === id ? null : state.gesture
+      setState({
+        ...state,
+        layout,
+        activeId,
+        gesture,
+        snapPreview: gesture ? state.snapPreview : null,
+      })
+      handOverFocus(id, activeId)
+    },
+
+    /** 창이 실제로 그려지는 자리. 최대화·스냅이면 기준 영역에서 계산한 값이다. */
+    getEffectiveRect(id: string): Rect | null {
+      const win = state.layout.windows[id]
+      return win ? effectiveRect(win, state.areaSize) : null
+    },
+
+    /**
+     * 이동을 시작할 자리를 돌려준다. 최대화·스냅된 창이면 일반 크기로 풀어 포인터 아래에 놓는다.
+     * pointer 는 기준 영역 좌표다.
+     */
+    detach(id: string, pointer: Point): Rect | null {
+      const win = state.layout.windows[id]
+      if (!win) return null
+      if (win.placement === 'normal') return win.rect
+      const from = effectiveRect(win, state.areaSize)
+      const rect = fitToArea(id, detachRect(from, win.rect, pointer, constraintFor(id)))
+      setNormalRect(id, rect)
+      return rect
+    },
+
     moveTo(id: string, position: Point) {
       const current = state.layout.windows[id]
       if (!current) return
-      setRect(id, fitToArea(id, roundRect({ ...current.rect, ...position })))
+      setNormalRect(id, fitToArea(id, roundRect({ ...current.rect, ...position })))
     },
 
-    /** 리사이즈 시작 시점의 rect 를 기준으로 계산한다. 누적 오차가 생기지 않는다. */
+    /**
+     * 리사이즈 시작 시점의 rect 를 기준으로 계산한다. 누적 오차가 생기지 않는다.
+     * 스냅된 창은 리사이즈하면 일반 상태가 된다. 최대화된 창은 리사이즈하지 않는다.
+     */
     resizeFrom(id: string, startRect: Rect, edge: ResizeEdge, delta: Point) {
+      const current = state.layout.windows[id]
+      if (!current || current.placement === 'maximized' || current.placement === 'minimized') return
       const m = meta.get(id)
       const rect = resizeRect(startRect, edge, delta, {
         minSize: m?.minSize ?? DEFAULT_MIN_SIZE,
@@ -276,17 +411,44 @@ export function createWindowManagerStore(
         area: state.areaSize ?? undefined,
         constraint: constraintFor(id),
       })
-      setRect(id, roundRect(rect))
+      setNormalRect(id, roundRect(rect))
     },
 
     beginGesture(id: string, type: GestureType) {
       setState({ ...state, gesture: { id, type } })
     },
 
-    endGesture() {
-      if (!state.gesture) return
-      setState({ ...state, gesture: null })
+    /** 이동 중 포인터 위치(기준 영역 좌표)로 스냅 대상을 갱신한다. 스냅이 꺼져 있으면 아무 일도 하지 않는다. */
+    previewSnap(pointer: Point) {
+      if (!snapOptions || !state.areaSize || state.gesture?.type !== 'move') return
+      const snapPreview = snapTargetAt(pointer, state.areaSize, snapOptions)
+      if (snapPreview !== state.snapPreview) setState({ ...state, snapPreview })
+    },
+
+    /**
+     * 제스처를 끝낸다. 스냅 대상이 있으면 적용한다.
+     * 취소된 제스처(`commit: false`)는 미리보기만 지운다.
+     */
+    endGesture({ commit = true }: { commit?: boolean } = {}) {
+      const { gesture, snapPreview } = state
+      if (!gesture) return
+      const win = state.layout.windows[gesture.id]
+      const target = commit && gesture.type === 'move' ? snapPreview : null
+      const layout =
+        target && win
+          ? withWindow(gesture.id, {
+              rect: win.rect,
+              placement: target === 'maximize' ? 'maximized' : { snap: target },
+            })
+          : state.layout
+      setState({ ...state, gesture: null, snapPreview: null, layout })
       scheduleLayoutEmit()
+    },
+
+    /** 화면 좌표를 기준 영역 좌표로 바꾼다. */
+    toAreaPoint(clientX: number, clientY: number): Point {
+      const origin = state.layerEl?.getBoundingClientRect()
+      return { x: clientX - (origin?.left ?? 0), y: clientY - (origin?.top ?? 0) }
     },
 
     setLayerEl(layerEl: HTMLElement | null) {
@@ -302,25 +464,47 @@ export function createWindowManagerStore(
 
     getLayout: () => state.layout,
 
+    /**
+     * 열려 있는 창의 목록. 연 순서대로이고, 활성화해도 순서가 바뀌지 않아 독에 쓰기 좋다.
+     * 배치나 활성 창이 바뀌지 않는 한 같은 배열을 돌려준다.
+     */
+    getWindowList(): WindowListItem[] {
+      const value = state.openIds.map((id) => ({
+        id,
+        placement: placementName(state.layout.windows[id]?.placement ?? 'normal'),
+        active: state.activeId === id,
+      }))
+      const key = value.map((item) => `${item.id}:${item.placement}:${item.active}`).join('|')
+      if (listCache?.key !== key) listCache = { key, value }
+      return listCache.value
+    },
+
     /** 저장해 둔 배치를 통째로 적용한다. 순서에는 지금 열려 있는 창만 남긴다. */
     setLayout(layout: WindowLayout) {
-      const known = layout.order.filter((id) => openIds.has(id))
-      const missing = [...openIds].filter((id) => !known.includes(id) && layout.windows[id])
+      const { openIds } = state
+      const known = layout.order.filter((id) => openIds.includes(id))
+      const missing = openIds.filter((id) => !known.includes(id) && layout.windows[id])
       const windows = { ...layout.windows }
       // 새 배치에 없는 열린 창은 지금 자리를 유지한다.
       const kept: string[] = []
       for (const id of openIds) {
-        if (!windows[id] && state.layout.windows[id]) {
-          windows[id] = state.layout.windows[id]
+        const current = state.layout.windows[id]
+        if (!windows[id] && current) {
+          windows[id] = current
           kept.push(id)
         }
       }
       const order = [...known, ...missing, ...kept]
-      const next = reclampAll({ windows, order })
+      const activeId =
+        state.activeId && order.includes(state.activeId) && windows[state.activeId]?.placement !== 'minimized'
+          ? state.activeId
+          : null
       setState({
         ...state,
-        layout: next,
-        activeId: state.activeId && order.includes(state.activeId) ? state.activeId : null,
+        layout: reclampAll({ windows, order }),
+        activeId,
+        gesture: null,
+        snapPreview: null,
       })
     },
   }
