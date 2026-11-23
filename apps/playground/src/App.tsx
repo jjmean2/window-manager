@@ -3,6 +3,8 @@ import { Menu } from '@base-ui/react/menu'
 import { Popover } from '@base-ui/react/popover'
 import {
   RESIZE_EDGES,
+  useWindow,
+  useWindowList,
   useWindowManager,
   Window,
   WindowManager,
@@ -12,6 +14,7 @@ import {
 import { useState, type ReactNode } from 'react'
 
 const STORAGE_KEY = 'window-manager-playground:layout'
+const DOCK_HEIGHT = 44
 
 const WINDOWS = [
   { id: 'inspector', title: 'Inspector', rect: { x: 340, y: 110, width: 360, height: 260 } },
@@ -53,6 +56,7 @@ export function App() {
   return (
     <WindowManager.Root
       defaultLayout={loadLayout()}
+      snap
       onLayoutChange={(layout) => {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(layout))
         setSaved((current) => ({ count: current.count + 1, layout }))
@@ -99,19 +103,23 @@ export function App() {
           <p className="filler">
             창 밖의 이 영역을 누르면 활성 창이 풀립니다. 타이틀바의 버튼이 아닌 곳을 잡고 창을
             옮기고, 네 변과 네 모서리를 잡아 크기를 바꿔 보세요. 창을 화면 밖으로 끌어내도
-            타이틀바 일부는 남습니다.
+            타이틀바 일부는 남습니다. 끌다가 포인터가 왼쪽·오른쪽 가장자리에 닿으면 절반으로,
+            위쪽에 닿으면 최대화로 스냅됩니다. 타이틀바를 더블클릭해도 최대화됩니다.
           </p>
         </main>
       </div>
 
-      <WindowManager.Viewport className="window-layer" />
+      {/* 기준 영역에서 독의 자리를 뺀다. 최대화와 스냅은 독 위까지만 채운다. */}
+      <WindowManager.Viewport className="window-layer" style={{ bottom: DOCK_HEIGHT }} />
+      <WindowManager.SnapPreview className="snap-preview" />
+      <Dock />
 
       <AppWindow
         id="inspector"
         title="Inspector"
         open={open.inspector}
         onOpenChange={setWindowOpen('inspector')}
-        controlsWidth={76}
+        controlsWidth={132}
         actions={
           <Menu.Root>
             <Menu.Trigger className="icon-button" aria-label="창 메뉴">
@@ -180,6 +188,39 @@ function ResetButton() {
   )
 }
 
+/** 창 상태에 따라 라벨과 모양이 바뀌는 버튼. `useWindow` 로 상태를 읽는다. */
+function MaximizeButton() {
+  const { placement } = useWindow()
+  const maximized = placement === 'maximized'
+  return (
+    <Window.Maximize className="icon-button" aria-label={maximized ? '이전 크기로' : '최대화'}>
+      {maximized ? '❐' : '□'}
+    </Window.Maximize>
+  )
+}
+
+/** 열려 있는 창의 목록. 최소화된 창을 되돌리는 곳이다. 창 레이어 위에 놓인다. */
+function Dock() {
+  const windows = useWindowList()
+  const manager = useWindowManager()
+  return (
+    <nav className="dock" aria-label="열린 창" style={{ height: DOCK_HEIGHT }}>
+      {windows.map((item) => (
+        <button
+          key={item.id}
+          type="button"
+          className="dock-item"
+          data-active={item.active ? '' : undefined}
+          data-minimized={item.placement === 'minimized' ? '' : undefined}
+          onClick={() => manager.activate(item.id)}
+        >
+          {WINDOWS.find((w) => w.id === item.id)?.title ?? item.id}
+        </button>
+      ))}
+    </nav>
+  )
+}
+
 interface AppWindowProps {
   id: WindowId
   title: string
@@ -193,7 +234,7 @@ interface AppWindowProps {
 
 /** headless 파트에 이 앱의 모양을 입힌 창. 디자인 시스템이라면 이 자리가 기본 스타일 래퍼다. */
 function AppWindow(props: AppWindowProps) {
-  const { id, title, open, onOpenChange, controlsWidth = 44, actions, children } = props
+  const { id, title, open, onOpenChange, controlsWidth = 100, actions, children } = props
   const defaultRect: DefaultRect = WINDOWS.find((w) => w.id === id)!.rect
   return (
     <Window.Root
@@ -207,6 +248,10 @@ function AppWindow(props: AppWindowProps) {
       <Window.Titlebar className="window-titlebar">
         <Window.Title className="window-title">{title}</Window.Title>
         {actions}
+        <Window.Minimize className="icon-button" aria-label="최소화">
+          –
+        </Window.Minimize>
+        <MaximizeButton />
         <Window.Close className="icon-button" aria-label="닫기">
           ✕
         </Window.Close>

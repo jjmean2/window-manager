@@ -133,6 +133,62 @@ body {
   box-shadow: 0 12px 32px rgb(0 0 0 / 0.24);
 }
 
+.window[data-placement='maximized'],
+.window[data-placement^='snap'] {
+  border-radius: 0;
+}
+
+.window[data-placement='maximized'] .window-titlebar,
+.window[data-placement^='snap'] .window-titlebar {
+  border-radius: 0;
+}
+
+.snap-preview {
+  border: 2px solid var(--accent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+/* 독: 루트 안에서 창 레이어(10)보다 위. 창은 이 밑으로 지나간다. */
+.dock {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-muted);
+}
+
+.dock-item {
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.dock-item[data-active] {
+  border-color: var(--accent);
+}
+
+.dock-item[data-minimized] {
+  border-style: dashed;
+  color: var(--text-muted);
+}
+
+.dock-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 .window-titlebar {
   display: flex;
   flex: none;
