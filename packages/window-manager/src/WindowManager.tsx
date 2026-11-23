@@ -94,7 +94,12 @@ function WindowLayer(props: ComponentProps<'div'> & { kind: 'viewport' | 'area' 
       {...rest}
       ref={ref}
       style={{
-        inset: 0,
+        // inset 축약형을 쓰지 않는다. 사용처가 bottom 같은 값을 넣었다 빼면 React 가 그 속성만
+        // 지워서, 축약형에서 온 0 까지 사라지고 레이어 높이가 무너진다.
+        top: 0,
+        right: 0,
+        bottom: 0,
+        left: 0,
         // hidden 이 아니라 clip 이다. hidden 이면 영역 밖에 걸친 창 안의 요소가 포커스를 받을 때
         // 레이어가 스크롤되어 모든 창이 밀린다.
         ...(kind === 'area' ? { overflow: 'clip' } : null),
@@ -114,8 +119,8 @@ function WindowLayer(props: ComponentProps<'div'> & { kind: 'viewport' | 'area' 
  * 다이얼로그·팝오버·툴팁이 z-index 계산 없이 모든 창 위에 온다.
  * 창끼리의 순서는 이 레이어 안에서만 정해진다.
  *
- * 독이나 상단 바의 자리를 비우려면 `style` 로 `top`·`bottom` 등을 주어 상자를 줄인다.
- * 최대화와 스냅은 줄어든 상자를 채운다.
+ * 독이나 상단 바의 자리를 비우려면 `style` 로 `top`·`right`·`bottom`·`left` 를 주어 상자를
+ * 줄인다(`inset` 축약형은 쓰지 않는다). 최대화와 스냅은 줄어든 상자를 채운다.
  */
 export function WindowManagerViewport(props: ComponentProps<'div'>) {
   return <WindowLayer kind="viewport" {...props} />
