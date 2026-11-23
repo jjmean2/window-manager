@@ -57,15 +57,45 @@ export function effectiveRect(win: PlacedWindow, area: Size | null): Rect {
 export interface SnapOptions {
   /** 포인터가 가장자리에서 이 거리 안에 들어오면 스냅 대상이 된다 */
   threshold: number
+  /**
+   * 한번 잡힌 스냅 대상을 놓아주기까지의 여유 거리. 대상은 포인터가 가장자리에서
+   * `threshold + release` 밖으로 나갈 때까지 유지된다.
+   */
+  release: number
   /** 위쪽 가장자리를 최대화 대상으로 쓸지 */
   top: boolean
 }
 
-/** 포인터 위치(기준 영역 좌표)가 가리키는 스냅 대상. 모서리에서는 좌우가 위쪽보다 우선한다. */
-export function snapTargetAt(point: Point, area: Size, options: SnapOptions): SnapTarget | null {
-  if (point.x <= options.threshold) return 'left'
-  if (point.x >= area.width - options.threshold) return 'right'
-  if (options.top && point.y <= options.threshold) return 'maximize'
+function withinEdge(target: SnapTarget, point: Point, area: Size, distance: number): boolean {
+  if (target === 'left') return point.x <= distance
+  if (target === 'right') return point.x >= area.width - distance
+  return point.y <= distance
+}
+
+/**
+ * 포인터 위치(기준 영역 좌표)가 가리키는 스냅 대상. 모서리에서는 좌우가 위쪽보다 우선한다.
+ *
+ * 이미 잡힌 대상(`current`)은 더 넓은 띠를 벗어날 때까지 유지한다. 사용자는 미리보기가 뜨는
+ * 순간 멈추므로 포인터가 경계 바로 위에 있는데, 버튼을 놓으며 손이 몇 px 흔들리면 대상이
+ * 풀려 "미리보기는 떴는데 스냅이 안 되는" 일이 생긴다. 들어오는 띠와 나가는 띠를 달리해 막는다.
+ */
+export function snapTargetAt(
+  point: Point,
+  area: Size,
+  options: SnapOptions,
+  current: SnapTarget | null = null,
+): SnapTarget | null {
+  const allowed = (target: SnapTarget) => target !== 'maximize' || options.top
+  if (
+    current &&
+    allowed(current) &&
+    withinEdge(current, point, area, options.threshold + options.release)
+  ) {
+    return current
+  }
+  for (const target of ['left', 'right', 'maximize'] as const) {
+    if (allowed(target) && withinEdge(target, point, area, options.threshold)) return target
+  }
   return null
 }
 

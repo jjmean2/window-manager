@@ -51,8 +51,44 @@ describe('placementName', () => {
   })
 })
 
+describe('snapTargetAt (잡힌 대상의 유지)', () => {
+  const options = { threshold: 8, release: 24, top: true }
+
+  it('경계를 1px 벗어나도 잡힌 대상을 유지한다', () => {
+    expect(snapTargetAt({ x: 9, y: 400 }, area, options, 'left')).toBe('left')
+    expect(snapTargetAt({ x: 992, y: 400 }, area, options, 'right')).toBe('right')
+    expect(snapTargetAt({ x: 500, y: 9 }, area, options, 'maximize')).toBe('maximize')
+  })
+
+  it('해제 띠의 끝까지는 유지하고, 그 밖에서 놓아준다', () => {
+    expect(snapTargetAt({ x: 32, y: 400 }, area, options, 'left')).toBe('left')
+    expect(snapTargetAt({ x: 33, y: 400 }, area, options, 'left')).toBeNull()
+    expect(snapTargetAt({ x: 500, y: 32 }, area, options, 'maximize')).toBe('maximize')
+    expect(snapTargetAt({ x: 500, y: 33 }, area, options, 'maximize')).toBeNull()
+  })
+
+  it('잡힌 대상이 없으면 좁은 띠에서만 잡힌다', () => {
+    expect(snapTargetAt({ x: 9, y: 400 }, area, options)).toBeNull()
+    expect(snapTargetAt({ x: 20, y: 400 }, area, options, null)).toBeNull()
+  })
+
+  it('모서리에서는 먼저 잡힌 대상이 해제 띠를 벗어날 때 다른 대상으로 넘어간다', () => {
+    // 왼쪽을 잡은 채 위쪽 띠에 들어와도 왼쪽이 유지된다.
+    expect(snapTargetAt({ x: 20, y: 3 }, area, options, 'left')).toBe('left')
+    // 왼쪽 해제 띠를 벗어나면 그 자리의 대상(위쪽)으로 넘어간다.
+    expect(snapTargetAt({ x: 40, y: 3 }, area, options, 'left')).toBe('maximize')
+    // 위쪽을 잡은 채 왼쪽 띠에 들어와도 위쪽이 유지된다.
+    expect(snapTargetAt({ x: 3, y: 20 }, area, options, 'maximize')).toBe('maximize')
+  })
+
+  it('위쪽 스냅이 꺼져 있으면 넘겨받은 최대화 대상도 유지하지 않는다', () => {
+    const noTop = { ...options, top: false }
+    expect(snapTargetAt({ x: 500, y: 9 }, area, noTop, 'maximize')).toBeNull()
+  })
+})
+
 describe('snapTargetAt', () => {
-  const options = { threshold: 8, top: true }
+  const options = { threshold: 8, release: 24, top: true }
 
   it('가장자리에서 떨어져 있으면 대상이 없다', () => {
     expect(snapTargetAt({ x: 500, y: 400 }, area, options)).toBeNull()
@@ -73,7 +109,7 @@ describe('snapTargetAt', () => {
   })
 
   it('위쪽 스냅을 끄면 최대화 대상이 없다', () => {
-    expect(snapTargetAt({ x: 500, y: 3 }, area, { threshold: 8, top: false })).toBeNull()
+    expect(snapTargetAt({ x: 500, y: 3 }, area, { ...options, top: false })).toBeNull()
   })
 })
 

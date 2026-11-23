@@ -475,6 +475,27 @@ describe('끌어서 스냅', () => {
     expect(store.getState().snapPreview).toBeNull()
   })
 
+  it('미리보기가 뜬 뒤 놓으면서 경계를 몇 px 벗어나도 스냅이 적용된다', () => {
+    const store = snapSetup()
+    store.beginGesture('a', 'move')
+    store.previewSnap({ x: 6, y: 400 })
+    // 버튼을 놓을 때의 손 흔들림. 들어오는 띠(8px)는 벗어났지만 해제 띠 안이다.
+    store.previewSnap({ x: 11, y: 401 })
+    expect(store.getState().snapPreview).toBe('left')
+    store.endGesture()
+    expect(store.getState().layout.windows.a!.placement).toEqual({ snap: 'left' })
+  })
+
+  it('해제 띠 밖으로 되돌아가면 미리보기가 사라지고 스냅하지 않는다', () => {
+    const store = snapSetup()
+    store.beginGesture('a', 'move')
+    store.previewSnap({ x: 6, y: 400 })
+    store.previewSnap({ x: 60, y: 400 })
+    expect(store.getState().snapPreview).toBeNull()
+    store.endGesture()
+    expect(store.getState().layout.windows.a!.placement).toBe('normal')
+  })
+
   it('놓을 때에만 적용한다', () => {
     const store = snapSetup()
     store.beginGesture('a', 'move')

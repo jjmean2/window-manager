@@ -89,7 +89,7 @@ export const DEFAULT_MIN_SIZE: Size = { width: 200, height: 120 }
 const EMPTY_LAYOUT: WindowLayout = { windows: {}, order: [] }
 const CASCADE_ORIGIN = 48
 const CASCADE_STEP = 28
-const DEFAULT_SNAP: SnapOptions = { threshold: 8, top: true }
+const DEFAULT_SNAP: SnapOptions = { threshold: 8, release: 24, top: true }
 
 export type WindowManagerStore = ReturnType<typeof createWindowManagerStore>
 
@@ -434,7 +434,7 @@ export function createWindowManagerStore(
     /** 이동 중 포인터 위치(기준 영역 좌표)로 스냅 대상을 갱신한다. 스냅이 꺼져 있으면 아무 일도 하지 않는다. */
     previewSnap(pointer: Point) {
       if (!snapOptions || !state.areaSize || state.gesture?.type !== 'move') return
-      const snapPreview = snapTargetAt(pointer, state.areaSize, snapOptions)
+      const snapPreview = snapTargetAt(pointer, state.areaSize, snapOptions, state.snapPreview)
       if (snapPreview !== state.snapPreview) setState({ ...state, snapPreview })
     },
 
