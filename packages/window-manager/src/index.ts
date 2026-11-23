@@ -9,6 +9,7 @@ import {
   WindowTitlebar,
 } from './Window.tsx'
 import {
+  WindowManagerArea,
   WindowManagerRoot,
   WindowManagerSnapPreview,
   WindowManagerViewport,
@@ -17,6 +18,7 @@ import {
 export const WindowManager = {
   Root: WindowManagerRoot,
   Viewport: WindowManagerViewport,
+  Area: WindowManagerArea,
   SnapPreview: WindowManagerSnapPreview,
 }
 

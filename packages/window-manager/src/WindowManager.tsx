@@ -50,17 +50,12 @@ export function WindowManagerRoot(props: WindowManagerRootProps) {
 }
 
 /**
- * 뷰포트 전체를 기준 영역으로 삼는 창 레이어.
- *
- * 앱 루트(`isolation: isolate`) 안에, 앱 내용 뒤에 둔다. 그러면 body 로 portal 되는
- * 다이얼로그·팝오버·툴팁이 z-index 계산 없이 모든 창 위에 온다.
- * 창끼리의 순서는 이 레이어 안에서만 정해진다.
- *
- * 기준 영역은 이 레이어의 상자다. 독이나 상단 바의 자리를 비우려면 `style` 로
- * `top`·`bottom` 등을 주어 상자를 줄인다. 최대화와 스냅은 줄어든 상자를 채운다.
+ * 창이 그려지는 레이어. 이 상자가 기준 영역이다. 좌표의 원점이고, 이동 제약과
+ * 최대화·스냅이 이 상자를 기준으로 계산된다. Viewport 와 Area 는 놓이는 방식과
+ * 잘라내기만 다르다.
  */
-export function WindowManagerViewport(props: ComponentProps<'div'>) {
-  const { style, ...rest } = props
+function WindowLayer(props: ComponentProps<'div'> & { kind: 'viewport' | 'area' }) {
+  const { kind, style, ...rest } = props
   const store = useManagerStore()
   const ref = useRef<HTMLDivElement>(null)
 
@@ -89,18 +84,47 @@ export function WindowManagerViewport(props: ComponentProps<'div'>) {
 
   return (
     <div
-      data-window-layer=""
+      data-window-layer={kind}
       {...rest}
       ref={ref}
       style={{
         inset: 0,
+        // hidden 이 아니라 clip 이다. hidden 이면 영역 밖에 걸친 창 안의 요소가 포커스를 받을 때
+        // 레이어가 스크롤되어 모든 창이 밀린다.
+        ...(kind === 'area' ? { overflow: 'clip' } : null),
         ...style,
-        position: 'fixed',
+        position: kind === 'viewport' ? 'fixed' : 'absolute',
         pointerEvents: 'none',
         isolation: 'isolate',
       }}
     />
   )
+}
+
+/**
+ * 뷰포트 전체를 기준 영역으로 삼는 창 레이어.
+ *
+ * 앱 루트(`isolation: isolate`) 안에, 앱 내용 뒤에 둔다. 그러면 body 로 portal 되는
+ * 다이얼로그·팝오버·툴팁이 z-index 계산 없이 모든 창 위에 온다.
+ * 창끼리의 순서는 이 레이어 안에서만 정해진다.
+ *
+ * 독이나 상단 바의 자리를 비우려면 `style` 로 `top`·`bottom` 등을 주어 상자를 줄인다.
+ * 최대화와 스냅은 줄어든 상자를 채운다.
+ */
+export function WindowManagerViewport(props: ComponentProps<'div'>) {
+  return <WindowLayer kind="viewport" {...props} />
+}
+
+/**
+ * 부모 요소를 기준 영역으로 삼는 창 레이어. 창은 그 안에서만 보이고, 영역 밖으로 나간
+ * 부분은 잘린다. 창에서 연 팝업은 body 로 portal 되므로 잘리지 않는다.
+ *
+ * - 부모 요소는 positioned(`position: relative` 등)여야 한다. 아니면 더 먼 조상을 채운다.
+ * - 부모 요소가 스크롤 컨테이너이면 안 된다. 레이어가 내용과 함께 스크롤된다.
+ * - 영역마다 `WindowManager.Root` 를 따로 둔다. 겹침 순서와 활성 창은 영역별로 독립이다.
+ */
+export function WindowManagerArea(props: ComponentProps<'div'>) {
+  return <WindowLayer kind="area" {...props} />
 }
 
 /**
