@@ -195,8 +195,8 @@ function ResetButton() {
 }
 
 /**
- * 진단용. 타이틀바를 끌다가 놓았을 때 제스처가 어떤 이벤트로 끝났고 그 순간 스냅 미리보기가
- * 있었는지를 한 줄로 보여 준다. 스냅이 빠졌을 때 이 줄을 보면 어느 경로였는지 알 수 있다.
+ * 진단용. 타이틀바를 끌다가 놓았을 때 어떤 이벤트가 어떤 순서로 왔고 그때마다 스냅 미리보기가
+ * 있었는지를 한 줄로 보여 준다. pointer capture 를 놓기 전에 잃었다면 그 순간의 상태도 적는다.
  * 라이브러리보다 먼저 보도록 window 의 캡처 단계에서 듣는다.
  */
 function LastDrop() {
@@ -205,10 +205,16 @@ function LastDrop() {
   useEffect(() => {
     interface Drop {
       windowId: string
+      titlebar: Element
       lastMove: string
-      up: string
-      preview: string
+      /** 종료 이벤트마다 좌표와 그 순간의 미리보기 */
       ends: string[]
+      /** capture 를 잃은 순간의 상태. 원인이 앱 안(DOM 교체)인지 바깥(포커스 등)인지 가른다 */
+      lost: { connected: boolean; focused: boolean } | null
+      /** capture 를 잃은 뒤 버튼을 놓기 전까지 온 이동의 수. 언제 잃었는지를 가른다 */
+      movesAfterLoss: number
+      released: boolean
+      blurred: boolean
     }
     let drop: Drop | null = null
     const at = (event: PointerEvent) => `${Math.round(event.clientX)},${Math.round(event.clientY)}`
@@ -216,46 +222,69 @@ function LastDrop() {
       document.querySelector<HTMLElement>('[data-window-snap-preview]')?.dataset
         .windowSnapPreview ?? '없음'
 
+    const report = (current: Drop) => {
+      const result =
+        document.querySelector<HTMLElement>(`[data-window-id="${current.windowId}"]`)?.dataset
+          .placement ?? '닫힘'
+      const loss = current.lost
+        ? ` · capture 상실 시 타이틀바 ${current.lost.connected ? '붙어 있음' : '문서에서 빠짐'},` +
+          ` 포커스 ${current.lost.focused ? '있음' : '없음'}, 그 뒤 이동 ${current.movesAfterLoss}회`
+        : ''
+      const line =
+        `${current.windowId}: ${current.ends.join(' → ')} · 마지막 이동 ${current.lastMove}` +
+        `${loss} · 창 blur ${current.blurred ? '있었음' : '없음'} · 결과 ${result}`
+      setText(line)
+      // 스냅된 창이 이 패널을 가릴 수 있으니 콘솔에도 남긴다.
+      console.info('[window-manager] 마지막 드롭 —', line)
+    }
+
     const onDown = (event: PointerEvent) => {
       const target = event.target instanceof Element ? event.target : null
-      const win = target?.closest('[data-window-titlebar]')?.closest<HTMLElement>('[data-window]')
-      drop = win
-        ? { windowId: win.dataset.windowId ?? '?', lastMove: '-', up: '-', preview: '-', ends: [] }
-        : null
+      const titlebar = target?.closest('[data-window-titlebar]')
+      const win = titlebar?.closest<HTMLElement>('[data-window]')
+      drop =
+        titlebar && win
+          ? {
+              windowId: win.dataset.windowId ?? '?',
+              titlebar,
+              lastMove: '-',
+              ends: [],
+              lost: null,
+              movesAfterLoss: 0,
+              released: false,
+              blurred: false,
+            }
+          : null
     }
     const onMove = (event: PointerEvent) => {
-      if (drop && drop.ends.length === 0) drop.lastMove = at(event)
+      if (!drop || drop.released) return
+      drop.lastMove = at(event)
+      if (drop.lost) drop.movesAfterLoss += 1
     }
     const onEnd = (event: PointerEvent) => {
       const current = drop
       if (!current) return
-      if (current.ends.length === 0) {
-        current.up = at(event)
-        current.preview = preview()
-        // 뒤따르는 이벤트(lostpointercapture 등)와 라이브러리의 처리가 끝난 뒤에 결과를 읽는다.
-        setTimeout(() => {
-          const result =
-            document.querySelector<HTMLElement>(`[data-window-id="${current.windowId}"]`)?.dataset
-              .placement ?? '닫힘'
-          const line =
-            `${current.windowId}: 종료 ${current.ends.join(' → ')} · 마지막 이동 ${current.lastMove}` +
-            ` · 놓은 곳 ${current.up} · 놓을 때 미리보기 ${current.preview} · 결과 ${result}`
-          setText(line)
-          // 스냅된 창이 이 패널을 가릴 수 있으니 콘솔에도 남긴다.
-          console.info('[window-manager] 마지막 드롭 —', line)
-          if (drop === current) drop = null
-        }, 100)
+      current.ends.push(`${event.type}@${at(event)}(미리보기 ${preview()})`)
+      if (event.type === 'lostpointercapture' && !current.lost && !current.released) {
+        current.lost = { connected: current.titlebar.isConnected, focused: document.hasFocus() }
       }
-      current.ends.push(event.type)
+      if (event.type !== 'lostpointercapture') current.released = true
+      // 뒤따르는 이벤트와 라이브러리의 처리가 끝난 뒤에 결과를 읽는다.
+      setTimeout(() => report(current), 100)
+    }
+    const onBlur = () => {
+      if (drop && !drop.released) drop.blurred = true
     }
 
     const endTypes = ['pointerup', 'pointercancel', 'lostpointercapture'] as const
     window.addEventListener('pointerdown', onDown, true)
     window.addEventListener('pointermove', onMove, true)
+    window.addEventListener('blur', onBlur)
     for (const type of endTypes) window.addEventListener(type, onEnd, true)
     return () => {
       window.removeEventListener('pointerdown', onDown, true)
       window.removeEventListener('pointermove', onMove, true)
+      window.removeEventListener('blur', onBlur)
       for (const type of endTypes) window.removeEventListener(type, onEnd, true)
     }
   }, [])
