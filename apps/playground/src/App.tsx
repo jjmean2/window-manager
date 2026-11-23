@@ -11,7 +11,7 @@ import {
   type DefaultRect,
   type WindowLayout,
 } from '@window-manager/react'
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 
 const STORAGE_KEY = 'window-manager-playground:layout'
 const AREA_STORAGE_KEY = 'window-manager-playground:area-layout'
@@ -100,6 +100,10 @@ export function App() {
             <dd data-testid="change-count">{saved.count}</dd>
             <dt>순서 (끝이 맨 앞)</dt>
             <dd data-testid="order">{saved.layout?.order.join(' → ') ?? '-'}</dd>
+            <dt>마지막 드롭</dt>
+            <dd data-testid="last-drop">
+              <LastDrop />
+            </dd>
           </dl>
           <p className="filler">
             창 밖의 이 영역을 누르면 활성 창이 풀립니다. 타이틀바의 버튼이 아닌 곳을 잡고 창을
@@ -188,6 +192,75 @@ function ResetButton() {
       배치 초기화
     </button>
   )
+}
+
+/**
+ * 진단용. 타이틀바를 끌다가 놓았을 때 제스처가 어떤 이벤트로 끝났고 그 순간 스냅 미리보기가
+ * 있었는지를 한 줄로 보여 준다. 스냅이 빠졌을 때 이 줄을 보면 어느 경로였는지 알 수 있다.
+ * 라이브러리보다 먼저 보도록 window 의 캡처 단계에서 듣는다.
+ */
+function LastDrop() {
+  const [text, setText] = useState('-')
+
+  useEffect(() => {
+    interface Drop {
+      windowId: string
+      lastMove: string
+      up: string
+      preview: string
+      ends: string[]
+    }
+    let drop: Drop | null = null
+    const at = (event: PointerEvent) => `${Math.round(event.clientX)},${Math.round(event.clientY)}`
+    const preview = () =>
+      document.querySelector<HTMLElement>('[data-window-snap-preview]')?.dataset
+        .windowSnapPreview ?? '없음'
+
+    const onDown = (event: PointerEvent) => {
+      const target = event.target instanceof Element ? event.target : null
+      const win = target?.closest('[data-window-titlebar]')?.closest<HTMLElement>('[data-window]')
+      drop = win
+        ? { windowId: win.dataset.windowId ?? '?', lastMove: '-', up: '-', preview: '-', ends: [] }
+        : null
+    }
+    const onMove = (event: PointerEvent) => {
+      if (drop && drop.ends.length === 0) drop.lastMove = at(event)
+    }
+    const onEnd = (event: PointerEvent) => {
+      const current = drop
+      if (!current) return
+      if (current.ends.length === 0) {
+        current.up = at(event)
+        current.preview = preview()
+        // 뒤따르는 이벤트(lostpointercapture 등)와 라이브러리의 처리가 끝난 뒤에 결과를 읽는다.
+        setTimeout(() => {
+          const result =
+            document.querySelector<HTMLElement>(`[data-window-id="${current.windowId}"]`)?.dataset
+              .placement ?? '닫힘'
+          const line =
+            `${current.windowId}: 종료 ${current.ends.join(' → ')} · 마지막 이동 ${current.lastMove}` +
+            ` · 놓은 곳 ${current.up} · 놓을 때 미리보기 ${current.preview} · 결과 ${result}`
+          setText(line)
+          // 스냅된 창이 이 패널을 가릴 수 있으니 콘솔에도 남긴다.
+          console.info('[window-manager] 마지막 드롭 —', line)
+          if (drop === current) drop = null
+        }, 100)
+      }
+      current.ends.push(event.type)
+    }
+
+    const endTypes = ['pointerup', 'pointercancel', 'lostpointercapture'] as const
+    window.addEventListener('pointerdown', onDown, true)
+    window.addEventListener('pointermove', onMove, true)
+    for (const type of endTypes) window.addEventListener(type, onEnd, true)
+    return () => {
+      window.removeEventListener('pointerdown', onDown, true)
+      window.removeEventListener('pointermove', onMove, true)
+      for (const type of endTypes) window.removeEventListener(type, onEnd, true)
+    }
+  }, [])
+
+  return <>{text}</>
 }
 
 /** 창 상태에 따라 라벨과 모양이 바뀌는 버튼. `useWindow` 로 상태를 읽는다. */
