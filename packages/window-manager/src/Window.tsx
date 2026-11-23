@@ -228,9 +228,12 @@ type PointerHandler = (event: ReactPointerEvent<HTMLDivElement>) => void
 function useWindowGesture({ type, edge }: GestureOptions) {
   const { id, store } = useWindowContext()
   const session = useRef<GestureSession | null>(null)
+  /** 가장 최근의 누름이 끌기로 이어졌는지. 다음 누름에서 초기화된다 */
+  const dragged = useRef(false)
 
   const onPointerDown: PointerHandler = (event) => {
     if (event.button !== 0 || session.current) return
+    dragged.current = false
     const handle = event.currentTarget
     const target = event.target as Element
     // React 이벤트는 portal 을 타고 올라온다. 타이틀바 버튼이 연 메뉴를 누른 경우를 걸러 낸다.
@@ -256,6 +259,7 @@ function useWindowGesture({ type, edge }: GestureOptions) {
       const distance = Math.hypot(event.clientX - current.startX, event.clientY - current.startY)
       if (type === 'move' && distance < MOVE_THRESHOLD) return
       current.started = true
+      dragged.current = true
       store.beginGesture(id, type)
       if (type === 'move') {
         // 최대화·스냅된 창이면 일반 크기로 풀어, 처음 누른 지점이 타이틀바 위에 오게 놓는다.
@@ -283,6 +287,7 @@ function useWindowGesture({ type, edge }: GestureOptions) {
   }
 
   return {
+    dragged,
     onPointerDown,
     onPointerMove,
     onPointerUp: finish(true),
@@ -340,6 +345,9 @@ export function WindowTitlebar(props: WindowTitlebarProps) {
     const target = event.target as Element
     // 이동 시작과 같은 가드. 버튼이나 거기서 연 메뉴 항목의 더블클릭은 받지 않는다.
     if (!handle.contains(target) || isInteractiveTarget(target, handle)) return
+    // 끌고 나서 놓아도 click 이 타이틀바에 발생한다. 타이틀바를 한 번 누른 직후 다시 눌러 끌면
+    // 그 click 이 두 번째 클릭으로 집계되어 dblclick 이 따라온다. 방금 적용된 스냅을 뒤집지 않게 무시한다.
+    if (gesture.dragged.current) return
     store.toggleMaximize(id)
   }
   return (
