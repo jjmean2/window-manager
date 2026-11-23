@@ -4,27 +4,38 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type ComponentProps,
   type ReactNode,
 } from 'react'
-import { ManagerContext, useManagerStore } from './context.ts'
+import { createPortal } from 'react-dom'
+import { ManagerContext, useManagerState, useManagerStore } from './context.ts'
 import { wasHandledByWindow } from './events.ts'
-import { createWindowManagerStore, type WindowLayout } from './store.ts'
+import { snapTargetRect, type SnapOptions, type SnapZone } from './placement.ts'
+import { createWindowManagerStore, type WindowLayout, type WindowListItem } from './store.ts'
 
 export interface WindowManagerRootProps {
-  /** 처음에 적용할 배치. 저장해 둔 값을 넣으면 창의 자리와 순서가 복원된다 */
+  /** 처음에 적용할 배치. 저장해 둔 값을 넣으면 창의 자리·순서·배치가 복원된다 */
   defaultLayout?: WindowLayout
   /** 배치가 바뀌면 호출된다. 이동·리사이즈 도중이 아니라 끝났을 때 한 번 호출된다 */
   onLayoutChange?: (layout: WindowLayout) => void
   /** 창이 영역 밖으로 나가도 남겨 둘 타이틀바의 가로 폭. 기본 64 */
   minVisibleWidth?: number
+  /**
+   * 끌다가 포인터가 가장자리에 닿으면 스냅한다. 왼쪽·오른쪽은 절반, 위쪽은 최대화다.
+   * 기본은 꺼져 있다. 켜면 포인터가 좌우 가장자리에 닿은 채로는 창을 그쪽 화면 밖에
+   * 걸쳐 둘 수 없다. `{ top: false }` 로 위쪽 최대화만 끌 수 있다.
+   */
+  snap?: boolean | Partial<SnapOptions>
   children?: ReactNode
 }
 
 /** 창 목록, 겹침 순서, 활성 창을 갖는다. DOM 은 그리지 않는다. */
 export function WindowManagerRoot(props: WindowManagerRootProps) {
-  const { defaultLayout, onLayoutChange, minVisibleWidth, children } = props
-  const [store] = useState(() => createWindowManagerStore(defaultLayout, { minVisibleWidth }))
+  const { defaultLayout, onLayoutChange, minVisibleWidth, snap, children } = props
+  const [store] = useState(() =>
+    createWindowManagerStore(defaultLayout, { minVisibleWidth, snap }),
+  )
 
   const onLayoutChangeRef = useRef(onLayoutChange)
   useEffect(() => {
@@ -44,6 +55,9 @@ export function WindowManagerRoot(props: WindowManagerRootProps) {
  * 앱 루트(`isolation: isolate`) 안에, 앱 내용 뒤에 둔다. 그러면 body 로 portal 되는
  * 다이얼로그·팝오버·툴팁이 z-index 계산 없이 모든 창 위에 온다.
  * 창끼리의 순서는 이 레이어 안에서만 정해진다.
+ *
+ * 기준 영역은 이 레이어의 상자다. 독이나 상단 바의 자리를 비우려면 `style` 로
+ * `top`·`bottom` 등을 주어 상자를 줄인다. 최대화와 스냅은 줄어든 상자를 채운다.
  */
 export function WindowManagerViewport(props: ComponentProps<'div'>) {
   const { style, ...rest } = props
@@ -79,9 +93,9 @@ export function WindowManagerViewport(props: ComponentProps<'div'>) {
       {...rest}
       ref={ref}
       style={{
+        inset: 0,
         ...style,
         position: 'fixed',
-        inset: 0,
         pointerEvents: 'none',
         isolation: 'isolate',
       }}
@@ -89,17 +103,80 @@ export function WindowManagerViewport(props: ComponentProps<'div'>) {
   )
 }
 
+/**
+ * 끌고 있는 창을 지금 놓으면 차지할 자리를 보여 준다. 스냅 대상이 있을 때만 그려지고,
+ * 끌고 있는 창 바로 아래에 놓인다. 모양은 사용처가 입힌다.
+ */
+export function WindowManagerSnapPreview(props: ComponentProps<'div'>) {
+  const { style, ...rest } = props
+  const store = useManagerStore()
+  const target = useManagerState(store, (state) => state.snapPreview)
+  const areaSize = useManagerState(store, (state) => state.areaSize)
+  const layerEl = useManagerState(store, (state) => state.layerEl)
+  const draggedIndex = useManagerState(store, (state) =>
+    state.gesture ? state.layout.order.indexOf(state.gesture.id) : -1,
+  )
+
+  if (!target || !areaSize || !layerEl) return null
+  const rect = snapTargetRect(target, areaSize)
+
+  return createPortal(
+    <div
+      aria-hidden="true"
+      data-window-snap-preview={target}
+      {...rest}
+      style={{
+        ...style,
+        position: 'absolute',
+        left: rect.x,
+        top: rect.y,
+        width: rect.width,
+        height: rect.height,
+        // 창은 짝수 z-index 를 쓴다. 끌고 있는 창 바로 아래의 홀수 자리에 놓는다.
+        zIndex: (draggedIndex + 1) * 2 - 1,
+        pointerEvents: 'none',
+      }}
+    />,
+    layerEl,
+  )
+}
+
 export interface WindowManagerApi {
   getLayout: () => WindowLayout
   setLayout: (layout: WindowLayout) => void
+  /** 맨 앞으로 가져오고 활성화한다. 최소화된 창은 원래 배치로 되돌린다 */
   activate: (id: string) => void
+  minimize: (id: string) => void
+  maximize: (id: string) => void
+  toggleMaximize: (id: string) => void
+  snap: (id: string, zone: SnapZone) => void
+  /** 최소화된 창은 되돌리며 활성화하고, 최대화·스냅된 창은 일반 상태로 돌린다 */
+  restore: (id: string) => void
 }
 
 /** 배치를 읽고 쓰는 명령형 API. 값이 바뀌어도 다시 렌더링되지 않는다. */
 export function useWindowManager(): WindowManagerApi {
   const store = useManagerStore()
   return useMemo(
-    () => ({ getLayout: store.getLayout, setLayout: store.setLayout, activate: store.activate }),
+    () => ({
+      getLayout: store.getLayout,
+      setLayout: store.setLayout,
+      activate: store.activate,
+      minimize: store.minimize,
+      maximize: store.maximize,
+      toggleMaximize: store.toggleMaximize,
+      snap: store.snap,
+      restore: store.restore,
+    }),
     [store],
   )
+}
+
+/**
+ * 열려 있는 창의 목록을 구독한다. 독이나 태스크바를 그릴 때 쓴다.
+ * 연 순서대로이고, 창을 옮기는 동안에는 다시 렌더링되지 않는다.
+ */
+export function useWindowList(): WindowListItem[] {
+  const store = useManagerStore()
+  return useSyncExternalStore(store.subscribe, store.getWindowList, store.getWindowList)
 }
