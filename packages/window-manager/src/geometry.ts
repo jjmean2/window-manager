@@ -64,12 +64,24 @@ export function clampPosition(rect: Rect, area: Size, constraint: ReachConstrain
   return x === rect.x && y === rect.y ? rect : { ...rect, x, y }
 }
 
+/**
+ * 크기는 그대로 두고 위치만 옮겨, 창 전체가 영역 안에 머물게 한다.
+ * 창이 영역보다 크면 왼쪽 위에 맞추고 넘치는 부분은 그대로 둔다.
+ */
+export function containPosition(rect: Rect, area: Size): Rect {
+  const x = clamp(rect.x, 0, Math.max(0, area.width - rect.width))
+  const y = clamp(rect.y, 0, Math.max(0, area.height - rect.height))
+  return x === rect.x && y === rect.y ? rect : { ...rect, x, y }
+}
+
 export interface ResizeOptions {
   minSize: Size
   maxSize?: Size
   /** 둘 다 주면 리사이즈 중에도 타이틀바가 닿는 위치에 남도록 제한한다 */
   area?: Size
   constraint?: ReachConstraint
+  /** area 와 함께 주면 네 변이 영역을 넘지 않는다. 최소 크기가 영역보다 크면 최소 크기를 따른다 */
+  contain?: boolean
 }
 
 /**
@@ -85,7 +97,9 @@ export function resizeRect(
   const { minSize, maxSize, area, constraint } = options
   const maxWidth = maxSize?.width ?? Infinity
   const maxHeight = maxSize?.height ?? Infinity
-  const bounded = area && constraint ? { area, constraint } : null
+  // 창 전체를 영역 안에 두는 제약과 타이틀바만 남기는 제약은 둘 중 하나만 적용한다.
+  const contained = options.contain && area ? area : null
+  const bounded = !contained && area && constraint ? { area, constraint } : null
 
   let left = start.x
   let right = start.x + start.width
@@ -98,7 +112,8 @@ export function resizeRect(
       // 창이 왼쪽으로 걸쳐 있을 때 오른쪽 변을 당겨 타이틀바가 사라지지 않게 한다.
       lowest = Math.max(lowest, bounded.constraint.minVisibleWidth + bounded.constraint.insetRight)
     }
-    right = Math.max(Math.min(right + delta.x, left + maxWidth), lowest)
+    const highest = Math.min(left + maxWidth, contained?.width ?? Infinity)
+    right = Math.max(Math.min(right + delta.x, highest), lowest)
   }
 
   if (edge.includes('w')) {
@@ -109,11 +124,13 @@ export function resizeRect(
         bounded.area.width - bounded.constraint.minVisibleWidth - bounded.constraint.insetLeft,
       )
     }
-    left = Math.min(Math.max(left + delta.x, right - maxWidth), highest)
+    const lowest = Math.max(right - maxWidth, contained ? 0 : -Infinity)
+    left = Math.min(Math.max(left + delta.x, lowest), highest)
   }
 
   if (edge.includes('s')) {
-    bottom = Math.max(Math.min(bottom + delta.y, top + maxHeight), top + minSize.height)
+    const highest = Math.min(top + maxHeight, contained?.height ?? Infinity)
+    bottom = Math.max(Math.min(bottom + delta.y, highest), top + minSize.height)
   }
 
   if (edge.includes('n')) {
@@ -121,8 +138,8 @@ export function resizeRect(
     let lowest = bottom - maxHeight
     if (bounded) {
       highest = Math.min(highest, bounded.area.height - bounded.constraint.titlebarHeight)
-      lowest = Math.max(lowest, 0)
     }
+    if (bounded || contained) lowest = Math.max(lowest, 0)
     top = Math.min(Math.max(top + delta.y, lowest), highest)
   }
 

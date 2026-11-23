@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { clampPosition, resizeRect, type ReachConstraint, type Rect } from './geometry.ts'
+import {
+  clampPosition,
+  containPosition,
+  resizeRect,
+  type ReachConstraint,
+  type Rect,
+} from './geometry.ts'
 
 const area = { width: 1000, height: 800 }
 const constraint: ReachConstraint = {
@@ -53,6 +59,63 @@ describe('clampPosition', () => {
     const result = clampPosition({ ...rect, x: 5000, y: 5000 }, area, constraint)
     expect(result.width).toBe(300)
     expect(result.height).toBe(200)
+  })
+})
+
+describe('containPosition', () => {
+  it('영역 안에 있는 창은 그대로 둔다', () => {
+    expect(containPosition(rect, area)).toBe(rect)
+  })
+
+  it('창 전체가 영역 안에 머물게 한다', () => {
+    expect(containPosition({ ...rect, x: -50, y: -50 }, area)).toMatchObject({ x: 0, y: 0 })
+    expect(containPosition({ ...rect, x: 5000, y: 5000 }, area)).toMatchObject({
+      x: 1000 - 300,
+      y: 800 - 200,
+    })
+  })
+
+  it('영역보다 큰 창은 왼쪽 위에 맞추고 크기는 바꾸지 않는다', () => {
+    const big = { x: 300, y: 300, width: 1500, height: 900 }
+    expect(containPosition(big, area)).toEqual({ x: 0, y: 0, width: 1500, height: 900 })
+  })
+})
+
+describe('resizeRect (contain)', () => {
+  const options = { minSize: { width: 200, height: 120 }, area, constraint, contain: true }
+
+  it('네 변이 영역을 넘지 않는다', () => {
+    expect(resizeRect(rect, 'se', { x: 5000, y: 5000 }, options)).toEqual({
+      x: 100,
+      y: 100,
+      width: 900,
+      height: 700,
+    })
+    expect(resizeRect(rect, 'nw', { x: -5000, y: -5000 }, options)).toEqual({
+      x: 0,
+      y: 0,
+      width: 400,
+      height: 300,
+    })
+  })
+
+  it('영역 안에서는 최소 크기까지 줄일 수 있다', () => {
+    expect(resizeRect(rect, 'se', { x: -5000, y: -5000 }, options)).toEqual({
+      x: 100,
+      y: 100,
+      width: 200,
+      height: 120,
+    })
+  })
+
+  it('최소 크기가 남은 공간보다 크면 최소 크기를 따른다', () => {
+    const nearEdge = { x: 900, y: 100, width: 200, height: 200 }
+    expect(resizeRect(nearEdge, 'e', { x: -50, y: 0 }, options).width).toBe(200)
+  })
+
+  it('contain 이 아니면 변이 영역 밖으로 나갈 수 있다', () => {
+    const loose = { ...options, contain: false }
+    expect(resizeRect(rect, 'e', { x: 5000, y: 0 }, loose).width).toBe(5300)
   })
 })
 

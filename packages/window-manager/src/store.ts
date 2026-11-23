@@ -1,5 +1,6 @@
 import {
   clampPosition,
+  containPosition,
   rectEquals,
   resizeRect,
   roundRect,
@@ -65,6 +66,12 @@ export interface WindowManagerOptions {
   /** 타이틀바를 아직 재지 못했을 때 쓰는 높이. 기본 32 */
   fallbackTitlebarHeight?: number
   /**
+   * 창이 기준 영역을 얼마나 벗어날 수 있는지.
+   * - `'reachable'` (기본): 벗어날 수 있지만 타이틀바의 잡을 수 있는 부분은 남는다.
+   * - `'contain'`: 창 전체가 영역 안에 머문다. 영역보다 큰 창은 왼쪽 위에 맞춘다.
+   */
+  moveConstraint?: 'reachable' | 'contain'
+  /**
    * 끌다가 포인터가 가장자리에 닿으면 스냅한다. 기본은 꺼져 있다.
    * 켜면 포인터가 좌우 가장자리에 닿은 채로는 창을 그쪽 화면 밖에 걸쳐 둘 수 없다.
    */
@@ -112,6 +119,7 @@ export function createWindowManagerStore(
   const minVisibleWidth = options.minVisibleWidth ?? 64
   const fallbackTitlebarHeight = options.fallbackTitlebarHeight ?? 32
   const snapOptions = resolveSnapOptions(options.snap)
+  const contain = options.moveConstraint === 'contain'
 
   let state: WindowManagerState = {
     // 저장된 order 는 그대로 믿는다. 열리지 않은 id 가 섞여 있어도 순서 계산에는 해가 없다.
@@ -166,7 +174,8 @@ export function createWindowManagerStore(
   }
 
   function fitToArea(id: string, rect: Rect, area: Size | null = state.areaSize): Rect {
-    return area ? clampPosition(rect, area, constraintFor(id)) : rect
+    if (!area) return rect
+    return contain ? containPosition(rect, area) : clampPosition(rect, area, constraintFor(id))
   }
 
   function withWindow(id: string, win: WindowState): WindowLayout {
@@ -412,6 +421,7 @@ export function createWindowManagerStore(
         maxSize: m?.maxSize,
         area: state.areaSize ?? undefined,
         constraint: constraintFor(id),
+        contain,
       })
       setNormalRect(id, roundRect(rect))
     },

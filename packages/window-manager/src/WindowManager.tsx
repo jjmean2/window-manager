@@ -22,6 +22,12 @@ export interface WindowManagerRootProps {
   /** 창이 영역 밖으로 나가도 남겨 둘 타이틀바의 가로 폭. 기본 64 */
   minVisibleWidth?: number
   /**
+   * 창이 기준 영역을 얼마나 벗어날 수 있는지.
+   * - `'reachable'` (기본): 벗어날 수 있지만 타이틀바의 잡을 수 있는 부분은 남는다.
+   * - `'contain'`: 창 전체가 영역 안에 머문다. 영역보다 큰 창은 왼쪽 위에 맞춘다.
+   */
+  moveConstraint?: 'reachable' | 'contain'
+  /**
    * 끌다가 포인터가 가장자리에 닿으면 스냅한다. 왼쪽·오른쪽은 절반, 위쪽은 최대화다.
    * 기본은 꺼져 있다. 켜면 포인터가 좌우 가장자리에 닿은 채로는 창을 그쪽 화면 밖에
    * 걸쳐 둘 수 없다. `{ top: false }` 로 위쪽 최대화만 끌 수 있다.
@@ -32,9 +38,9 @@ export interface WindowManagerRootProps {
 
 /** 창 목록, 겹침 순서, 활성 창을 갖는다. DOM 은 그리지 않는다. */
 export function WindowManagerRoot(props: WindowManagerRootProps) {
-  const { defaultLayout, onLayoutChange, minVisibleWidth, snap, children } = props
+  const { defaultLayout, onLayoutChange, minVisibleWidth, moveConstraint, snap, children } = props
   const [store] = useState(() =>
-    createWindowManagerStore(defaultLayout, { minVisibleWidth, snap }),
+    createWindowManagerStore(defaultLayout, { minVisibleWidth, moveConstraint, snap }),
   )
 
   const onLayoutChangeRef = useRef(onLayoutChange)

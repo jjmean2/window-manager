@@ -158,6 +158,43 @@ describe('이동 제약', () => {
   })
 })
 
+describe("moveConstraint: 'contain'", () => {
+  function containSetup() {
+    const store = createWindowManagerStore(undefined, { moveConstraint: 'contain' })
+    store.setAreaSize({ width: 1000, height: 800 })
+    return store
+  }
+
+  it('창 전체가 영역 안에 머문다', () => {
+    const store = containSetup()
+    store.register('a', { ...size, x: 10, y: 10 })
+    store.moveTo('a', { x: -5000, y: -5000 })
+    expect(store.getState().layout.windows.a!.rect).toMatchObject({ x: 0, y: 0 })
+    store.moveTo('a', { x: 5000, y: 5000 })
+    expect(store.getState().layout.windows.a!.rect).toMatchObject({ x: 700, y: 600 })
+  })
+
+  it('리사이즈도 영역을 넘지 않는다', () => {
+    const store = containSetup()
+    store.register('a', { ...size, x: 100, y: 100 })
+    const start = store.getState().layout.windows.a!.rect
+    store.resizeFrom('a', start, 'se', { x: 5000, y: 5000 })
+    expect(store.getState().layout.windows.a!.rect).toEqual({
+      x: 100,
+      y: 100,
+      width: 900,
+      height: 700,
+    })
+  })
+
+  it('영역이 창보다 작아지면 왼쪽 위에 맞추고 크기는 바꾸지 않는다', () => {
+    const store = containSetup()
+    store.register('a', { ...size, x: 600, y: 500 })
+    store.setAreaSize({ width: 250, height: 150 })
+    expect(store.getState().layout.windows.a!.rect).toEqual({ x: 0, y: 0, ...size })
+  })
+})
+
 describe('onLayoutChange', () => {
   it('제스처 도중에는 알리지 않고 끝났을 때 한 번 알린다', async () => {
     const store = setup()
