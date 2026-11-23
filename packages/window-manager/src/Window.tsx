@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useEffect,
   useId,
   useLayoutEffect,
   useMemo,
@@ -19,7 +20,8 @@ import {
   type WindowContextValue,
 } from './context.ts'
 import { isInteractiveTarget, markHandledByWindow } from './events.ts'
-import type { Rect, ResizeEdge, Size } from './geometry.ts'
+import { createPointerSession, type PointerSession } from './gesture.ts'
+import type { ResizeEdge, Size } from './geometry.ts'
 import { effectiveRect, placementName, type PlacementName } from './placement.ts'
 import type { DefaultRect, GestureType } from './store.ts'
 
@@ -214,25 +216,27 @@ interface GestureOptions {
   edge?: ResizeEdge
 }
 
-interface GestureSession {
-  pointerId: number
-  startX: number
-  startY: number
-  startRect: Rect
-  started: boolean
-}
-
 type PointerHandler = (event: ReactPointerEvent<HTMLDivElement>) => void
 
-/** 이동과 리사이즈가 함께 쓰는 포인터 제스처. 핸들 요소에 pointer capture 를 건다. */
+/**
+ * 이동과 리사이즈가 함께 쓰는 포인터 제스처.
+ *
+ * 누른 뒤의 이동·놓기·취소는 손잡이가 아니라 window 에서 듣는다. 손잡이에 pointer capture 도
+ * 걸지만 보조일 뿐이고, 제스처의 수명은 거기에 묶여 있지 않다. capture 는 버튼을 놓기 전에도
+ * 풀릴 수 있어서(화면 가장자리에서 실제로 관측됐다), 그것을 끝으로 삼으면 미리보기가 떠 있던
+ * 스냅이 버려진다.
+ */
 function useWindowGesture({ type, edge }: GestureOptions) {
   const { id, store } = useWindowContext()
-  const session = useRef<GestureSession | null>(null)
+  const active = useRef<PointerSession | null>(null)
   /** 가장 최근의 누름이 끌기로 이어졌는지. 다음 누름에서 초기화된다 */
   const dragged = useRef(false)
 
+  // 제스처 도중 손잡이가 사라지면 window 에 붙인 리스너를 뗀다.
+  useEffect(() => () => active.current?.abort(), [])
+
   const onPointerDown: PointerHandler = (event) => {
-    if (event.button !== 0 || session.current) return
+    if (event.button !== 0 || active.current) return
     dragged.current = false
     const handle = event.currentTarget
     const target = event.target as Element
@@ -240,61 +244,66 @@ function useWindowGesture({ type, edge }: GestureOptions) {
     if (!handle.contains(target)) return
     if (type === 'move' && isInteractiveTarget(target, handle)) return
     // 최대화·스냅된 창은 영역에서 계산한 자리에 그려져 있다. 그 자리에서 시작한다.
-    const startRect = store.getEffectiveRect(id)
+    let startRect = store.getEffectiveRect(id)
     if (!startRect) return
-    handle.setPointerCapture(event.pointerId)
-    session.current = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      startRect,
-      started: false,
+
+    const { pointerId, clientX: startX, clientY: startY } = event
+    // 보조. 포인터가 손잡이를 벗어나도 커서 모양이 유지되고, 다른 요소가 hover 되지 않는다.
+    try {
+      handle.setPointerCapture(pointerId)
+    } catch {
+      // 이미 사라진 포인터. capture 없이도 window 리스너로 동작한다.
     }
+
+    const session = createPointerSession({
+      pointerId,
+      startX,
+      startY,
+      // 타이틀바를 눌렀다 떼는 것만으로 창이 밀리지 않게 한다. 리사이즈는 첫 이동에서 시작한다.
+      threshold: type === 'move' ? MOVE_THRESHOLD : 0,
+      onStart() {
+        dragged.current = true
+        store.beginGesture(id, type)
+        if (type === 'move') {
+          // 최대화·스냅된 창이면 일반 크기로 풀어, 처음 누른 지점이 타이틀바 위에 오게 놓는다.
+          // 이동량은 누른 지점부터 재므로, 첫 이동이 멀리 튀어도 타이틀바가 포인터를 따라온다.
+          const detached = store.detach(id, store.toAreaPoint(startX, startY))
+          if (detached) startRect = detached
+        }
+      },
+      onMove(delta, sample) {
+        if (!startRect) return
+        if (type === 'move') {
+          store.moveTo(id, { x: startRect.x + delta.x, y: startRect.y + delta.y })
+          store.previewSnap(store.toAreaPoint(sample.clientX, sample.clientY))
+        } else if (edge) {
+          store.resizeFrom(id, startRect, edge, delta)
+        }
+      },
+      onEnd({ started, commit }) {
+        window.removeEventListener('pointermove', onMove, true)
+        window.removeEventListener('pointerup', onUp, true)
+        window.removeEventListener('pointercancel', onCancel, true)
+        active.current = null
+        try {
+          if (handle.hasPointerCapture(pointerId)) handle.releasePointerCapture(pointerId)
+        } catch {
+          // 손잡이가 이미 문서에서 빠졌다.
+        }
+        if (started) store.endGesture({ commit })
+      },
+    })
+
+    const onMove = (native: PointerEvent) => session.move(native)
+    const onUp = (native: PointerEvent) => session.up(native)
+    const onCancel = (native: PointerEvent) => session.cancel(native)
+    window.addEventListener('pointermove', onMove, true)
+    window.addEventListener('pointerup', onUp, true)
+    window.addEventListener('pointercancel', onCancel, true)
+    active.current = session
   }
 
-  const onPointerMove: PointerHandler = (event) => {
-    const current = session.current
-    if (!current || current.pointerId !== event.pointerId) return
-    if (!current.started) {
-      const distance = Math.hypot(event.clientX - current.startX, event.clientY - current.startY)
-      if (type === 'move' && distance < MOVE_THRESHOLD) return
-      current.started = true
-      dragged.current = true
-      store.beginGesture(id, type)
-      if (type === 'move') {
-        // 최대화·스냅된 창이면 일반 크기로 풀어, 처음 누른 지점이 타이틀바 위에 오게 놓는다.
-        // 이동량은 누른 지점부터 재므로, 첫 이동이 멀리 튀어도 타이틀바가 포인터를 따라온다.
-        const detached = store.detach(id, store.toAreaPoint(current.startX, current.startY))
-        if (detached) current.startRect = detached
-      }
-    }
-    const delta = { x: event.clientX - current.startX, y: event.clientY - current.startY }
-    if (type === 'move') {
-      store.moveTo(id, { x: current.startRect.x + delta.x, y: current.startRect.y + delta.y })
-      store.previewSnap(store.toAreaPoint(event.clientX, event.clientY))
-    } else if (edge) {
-      store.resizeFrom(id, current.startRect, edge, delta)
-    }
-  }
-
-  const finish = (commit: boolean): PointerHandler => (event) => {
-    const current = session.current
-    if (!current || current.pointerId !== event.pointerId) return
-    session.current = null
-    const handle = event.currentTarget
-    if (handle.hasPointerCapture(event.pointerId)) handle.releasePointerCapture(event.pointerId)
-    if (current.started) store.endGesture({ commit })
-  }
-
-  return {
-    dragged,
-    onPointerDown,
-    onPointerMove,
-    onPointerUp: finish(true),
-    // 취소되거나 capture 를 잃은 제스처는 스냅을 적용하지 않는다.
-    onPointerCancel: finish(false),
-    onLostPointerCapture: finish(false),
-  }
+  return { dragged, onPointerDown }
 }
 
 function chain<E extends { defaultPrevented: boolean }>(
@@ -312,14 +321,8 @@ function withGesture(
   props: ComponentProps<'div'>,
   gesture: ReturnType<typeof useWindowGesture>,
 ): ComponentProps<'div'> {
-  return {
-    ...props,
-    onPointerDown: chain(gesture.onPointerDown, props.onPointerDown),
-    onPointerMove: chain(gesture.onPointerMove, props.onPointerMove),
-    onPointerUp: chain(gesture.onPointerUp, props.onPointerUp),
-    onPointerCancel: chain(gesture.onPointerCancel, props.onPointerCancel),
-    onLostPointerCapture: chain(gesture.onLostPointerCapture, props.onLostPointerCapture),
-  }
+  // 누름만 감싼다. 그 뒤의 이벤트는 window 에서 듣으므로 사용처의 핸들러를 가로채지 않는다.
+  return { ...props, onPointerDown: chain(gesture.onPointerDown, props.onPointerDown) }
 }
 
 export interface WindowTitlebarProps extends ComponentProps<'div'> {
