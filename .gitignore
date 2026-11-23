@@ -2,3 +2,7 @@ node_modules
 dist
 *.tsbuildinfo
 .DS_Store
+
+# Claude Code 가 작업용으로 만드는 git worktree. 기기마다 다른 내용이라 추적하지 않는다.
+# .claude/ 의 나머지(settings.json, skills, commands 등)는 공유하는 파일이라 무시하지 않는다.
+.claude/worktrees/
