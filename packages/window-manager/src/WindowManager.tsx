@@ -76,7 +76,7 @@ export function WindowManagerViewport(props: ComponentProps<'div'>) {
     // 어느 창에도 속하지 않은 곳을 누르면 활성 창을 푼다.
     // React 핸들러(루트 컨테이너)가 document 의 버블 리스너보다 먼저 실행된다.
     const onPointerDown = (event: PointerEvent) => {
-      if (!wasHandledByWindow(event)) store.deactivate()
+      if (!wasHandledByWindow(event, store)) store.deactivate()
     }
     document.addEventListener('pointerdown', onPointerDown)
 

@@ -1,12 +1,17 @@
-const handledByWindow = new WeakSet<Event>()
+const handledBy = new WeakMap<Event, Set<object>>()
 
-/** 창 안에서(창이 연 팝업 포함) 일어난 누름임을 표시한다. */
-export function markHandledByWindow(event: Event) {
-  handledByWindow.add(event)
+/**
+ * 어느 관리자의 창 안에서(창이 연 팝업 포함) 일어난 누름인지 표시한다.
+ * 관리자별로 기록하므로, 한 관리자의 창을 누르면 다른 관리자에게는 바깥 누름이 된다.
+ */
+export function markHandledByWindow(event: Event, manager: object) {
+  const managers = handledBy.get(event)
+  if (managers) managers.add(manager)
+  else handledBy.set(event, new Set([manager]))
 }
 
-export function wasHandledByWindow(event: Event): boolean {
-  return handledByWindow.has(event)
+export function wasHandledByWindow(event: Event, manager: object): boolean {
+  return handledBy.get(event)?.has(manager) ?? false
 }
 
 const INTERACTIVE_SELECTOR = [

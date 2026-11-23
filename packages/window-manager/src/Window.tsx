@@ -143,7 +143,7 @@ export function WindowRoot(props: WindowRootProps) {
         ref={setElement}
         // 캡처 단계에서 받으므로, 이 창이 연 팝업(body 로 portal)을 눌러도 창이 활성화된다.
         onPointerDownCapture={(event) => {
-          markHandledByWindow(event.nativeEvent)
+          markHandledByWindow(event.nativeEvent, store)
           store.activate(id)
           onPointerDownCapture?.(event)
         }}
