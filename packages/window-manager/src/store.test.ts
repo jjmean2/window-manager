@@ -448,6 +448,42 @@ describe('끌어서 스냅', () => {
     expect(store.getState().snapPreview).toBeNull()
   })
 
+  it('스냅을 풀면 끌려온 가장자리가 아니라 끌기 전의 자리로 돌아간다', () => {
+    const store = snapSetup()
+    store.beginGesture('a', 'move')
+    store.moveTo('a', { x: 900, y: 300 })
+    store.previewSnap({ x: 998, y: 400 })
+    store.endGesture()
+    store.restore('a')
+    expect(store.getState().layout.windows.a).toEqual({
+      rect: { x: 100, y: 100, ...size },
+      placement: 'normal',
+    })
+  })
+
+  it('최대화에서 끌어내 다시 스냅해도 원래 자리를 기억한다', () => {
+    const store = snapSetup()
+    store.maximize('a')
+    store.beginGesture('a', 'move')
+    const start = store.detach('a', { x: 500, y: 16 })!
+    store.moveTo('a', { x: start.x - 400, y: start.y + 200 })
+    store.previewSnap({ x: 2, y: 216 })
+    store.endGesture()
+    expect(store.getState().layout.windows.a).toEqual({
+      rect: { x: 100, y: 100, ...size },
+      placement: { snap: 'left' },
+    })
+  })
+
+  it('스냅하지 않고 놓으면 옮긴 자리에 남는다', () => {
+    const store = snapSetup()
+    store.beginGesture('a', 'move')
+    store.moveTo('a', { x: 400, y: 300 })
+    store.previewSnap({ x: 500, y: 320 })
+    store.endGesture()
+    expect(store.getState().layout.windows.a!.rect).toMatchObject({ x: 400, y: 300 })
+  })
+
   it('위쪽 가장자리에서 놓으면 최대화된다', () => {
     const store = snapSetup()
     store.beginGesture('a', 'move')

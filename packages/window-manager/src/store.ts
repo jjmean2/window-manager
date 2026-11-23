@@ -132,6 +132,8 @@ export function createWindowManagerStore(
   let emittedLayout = state.layout
   let emitScheduled = false
   let listCache: { key: string; value: WindowListItem[] } | null = null
+  /** 제스처를 시작할 때의 일반 rect. 끌어서 스냅하면 이 자리를 돌아갈 곳으로 남긴다. */
+  let gestureOrigin: Rect | null = null
 
   function setState(next: WindowManagerState) {
     if (next === state) return
@@ -415,6 +417,7 @@ export function createWindowManagerStore(
     },
 
     beginGesture(id: string, type: GestureType) {
+      gestureOrigin = state.layout.windows[id]?.rect ?? null
       setState({ ...state, gesture: { id, type } })
     },
 
@@ -434,13 +437,15 @@ export function createWindowManagerStore(
       if (!gesture) return
       const win = state.layout.windows[gesture.id]
       const target = commit && gesture.type === 'move' ? snapPreview : null
+      // 스냅할 때는 끌려온 자리(가장자리)가 아니라 끌기 전의 자리를 일반 상태의 자리로 남긴다.
       const layout =
         target && win
           ? withWindow(gesture.id, {
-              rect: win.rect,
+              rect: gestureOrigin ?? win.rect,
               placement: target === 'maximize' ? 'maximized' : { snap: target },
             })
           : state.layout
+      gestureOrigin = null
       setState({ ...state, gesture: null, snapPreview: null, layout })
       scheduleLayoutEmit()
     },
