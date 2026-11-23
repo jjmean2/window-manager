@@ -143,6 +143,49 @@ body {
   border-radius: 0;
 }
 
+.area-section {
+  margin-top: 300px;
+}
+
+.area-section h2 {
+  margin: 0 0 8px;
+  font-size: 16px;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+  color: var(--text-muted);
+}
+
+/* Area 의 부모: positioned 이고 스크롤하지 않는다. */
+.area-box {
+  position: relative;
+  max-width: 640px;
+  height: 360px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  background: var(--surface-muted);
+}
+
+.input {
+  width: 100%;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 .snap-preview {
   border: 2px solid var(--accent);
   border-radius: 10px;

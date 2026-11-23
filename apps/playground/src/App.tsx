@@ -14,6 +14,7 @@ import {
 import { useState, type ReactNode } from 'react'
 
 const STORAGE_KEY = 'window-manager-playground:layout'
+const AREA_STORAGE_KEY = 'window-manager-playground:area-layout'
 const DOCK_HEIGHT = 44
 
 const WINDOWS = [
@@ -31,9 +32,9 @@ const DEFAULT_LAYOUT: WindowLayout = {
   order: WINDOWS.map((w) => w.id),
 }
 
-function loadLayout(): WindowLayout | undefined {
+function loadLayout(key: string = STORAGE_KEY): WindowLayout | undefined {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
+    const raw = localStorage.getItem(key)
     return raw ? (JSON.parse(raw) as WindowLayout) : undefined
   } catch {
     return undefined
@@ -106,6 +107,7 @@ export function App() {
             타이틀바 일부는 남습니다. 끌다가 포인터가 왼쪽·오른쪽 가장자리에 닿으면 절반으로,
             위쪽에 닿으면 최대화로 스냅됩니다. 타이틀바를 더블클릭해도 최대화됩니다.
           </p>
+          <ScopedArea />
         </main>
       </div>
 
@@ -221,11 +223,75 @@ function Dock() {
   )
 }
 
+/**
+ * 레이아웃의 한 구역만 기준 영역으로 쓰는 창 관리자. 뷰포트 쪽과는 별개의 Root 라서
+ * 겹침 순서와 활성 창, 저장되는 배치가 따로다.
+ */
+function ScopedArea() {
+  const [contain, setContain] = useState(false)
+  return (
+    <section className="area-section">
+      <h2>영역 한정</h2>
+      <label className="check">
+        <input
+          type="checkbox"
+          checked={contain}
+          onChange={(event) => setContain(event.target.checked)}
+        />
+        창 전체를 영역 안에 두기
+      </label>
+      {/* Area 의 부모는 positioned 여야 하고, 스크롤 컨테이너이면 안 된다. */}
+      <div className="area-box" data-testid="area-box">
+        <WindowManager.Root
+          // 이동 제약은 관리자를 만들 때 정해진다. 바꾸려면 관리자를 새로 만든다.
+          key={contain ? 'contain' : 'reachable'}
+          defaultLayout={loadLayout(AREA_STORAGE_KEY)}
+          moveConstraint={contain ? 'contain' : 'reachable'}
+          snap
+          onLayoutChange={(layout) =>
+            localStorage.setItem(AREA_STORAGE_KEY, JSON.stringify(layout))
+          }
+        >
+          <WindowManager.Area />
+          <WindowManager.SnapPreview className="snap-preview" />
+          <AppWindow
+            id="area-a"
+            title="Area A"
+            defaultRect={{ x: 24, y: 24, width: 260, height: 180 }}
+          >
+            <Popover.Root>
+              <Popover.Trigger className="button">영역 창의 팝오버</Popover.Trigger>
+              <Popover.Portal>
+                <Popover.Positioner className="positioner" sideOffset={8}>
+                  <Popover.Popup className="popup">
+                    <Popover.Title className="popup-title">영역 창에서 연 팝오버</Popover.Title>
+                    <p>영역에 잘리지 않고 뷰포트 창 위에 떠야 합니다.</p>
+                  </Popover.Popup>
+                </Popover.Positioner>
+              </Popover.Portal>
+            </Popover.Root>
+            <input className="input" placeholder="포커스 확인용" />
+          </AppWindow>
+          <AppWindow
+            id="area-b"
+            title="Area B"
+            defaultRect={{ x: 200, y: 120, width: 260, height: 180 }}
+          >
+            <p>테두리 밖으로 나간 부분은 잘립니다.</p>
+          </AppWindow>
+        </WindowManager.Root>
+      </div>
+    </section>
+  )
+}
+
 interface AppWindowProps {
-  id: WindowId
+  id: string
   title: string
-  open: boolean
-  onOpenChange: (open: boolean) => void
+  /** 생략하면 WINDOWS 에 적힌 자리를 쓴다 */
+  defaultRect?: DefaultRect
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
   /** 타이틀바 오른쪽 버튼들이 차지하는 폭 */
   controlsWidth?: number
   actions?: ReactNode
@@ -235,7 +301,8 @@ interface AppWindowProps {
 /** headless 파트에 이 앱의 모양을 입힌 창. 디자인 시스템이라면 이 자리가 기본 스타일 래퍼다. */
 function AppWindow(props: AppWindowProps) {
   const { id, title, open, onOpenChange, controlsWidth = 100, actions, children } = props
-  const defaultRect: DefaultRect = WINDOWS.find((w) => w.id === id)!.rect
+  const defaultRect: DefaultRect = props.defaultRect ??
+    WINDOWS.find((w) => w.id === id)?.rect ?? { width: 300, height: 200 }
   return (
     <Window.Root
       id={id}
